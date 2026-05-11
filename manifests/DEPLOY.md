@@ -83,7 +83,7 @@ curl -s https://raw.githubusercontent.com/metallb/metallb/v${MetalLB_RTAG}/confi
   | kubectl apply -f -
 ```
 
-**2. Configure an IP pool** (adjust the range to suit your network):
+**2. Configure an IP pool** (adjust the range and interface to suit your network):
 ```bash
 kubectl apply -f - <<EOF
 apiVersion: metallb.io/v1beta1
@@ -104,8 +104,14 @@ metadata:
 spec:
   ipAddressPools:
     - production
+  interfaces:
+    - eth0    # Lock to your LAN interface — check with: ip link show
 EOF
 ```
+
+> **Multi-NIC nodes:** If your nodes have both a wired and wireless interface, always lock
+> `interfaces` to the LAN NIC. Otherwise MetalLB advertises on all interfaces and you get
+> unpredictable ARP responses. Common names: `eth0`, `eno1`, `enp2s0` — check with `ip link show`.
 
 **3. Uncomment and set your IP** in `50-services.yaml`:
 ```yaml
