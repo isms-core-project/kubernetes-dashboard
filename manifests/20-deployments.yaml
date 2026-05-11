@@ -138,6 +138,13 @@ spec:
                   name: kubernetes-dashboard-ai
                   key: api-key
                   optional: true
+            # ── Proxy (optional) ─────────────────────────────────────────────────────
+            # Required if your cluster has no direct outbound internet access.
+            # The AI assistant calls api.anthropic.com:443 — route it through your proxy.
+            # - name: HTTPS_PROXY
+            #   value: "http://proxy.example.com:3128"
+            # - name: NO_PROXY
+            #   value: "localhost,127.0.0.1,10.0.0.0/8,.cluster.local"
             - name: GOMAXPROCS
               valueFrom:
                 resourceFieldRef:
