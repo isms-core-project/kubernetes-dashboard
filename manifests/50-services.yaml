@@ -1,0 +1,110 @@
+# ==============================================================================================================
+# 50-services.yaml — All services (backend ClusterIP + Kong NodePort)
+# ==============================================================================================================
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubernetes-dashboard-auth
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/component: auth
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/name: kubernetes-dashboard-auth
+  ports:
+    - name: auth
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubernetes-dashboard-api
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/name: kubernetes-dashboard-api
+  ports:
+    - name: api
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubernetes-dashboard-web
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/component: web
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/name: kubernetes-dashboard-web
+  ports:
+    - name: web
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubernetes-dashboard-metrics-scraper
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/component: metrics-scraper
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/name: kubernetes-dashboard-metrics-scraper
+  ports:
+    - name: metrics-scraper
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+
+---
+# Kong proxy — LoadBalancer entry point on 10.0.0.60 (MetalLB)
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubernetes-dashboard-kong-proxy
+  namespace: kubernetes-dashboard
+  annotations:
+    metallb.io/loadBalancerIPs: "10.0.0.60"
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/component: kong
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/name: kubernetes-dashboard-kong
+  ports:
+    - name: proxy
+      port: 80
+      targetPort: 8000
+      protocol: TCP
+    - name: proxy-ssl
+      port: 443
+      targetPort: 8443
+      protocol: TCP

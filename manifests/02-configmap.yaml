@@ -1,0 +1,67 @@
+# ==============================================================================================================
+# 02-configmap.yaml
+# ==============================================================================================================
+
+---
+# Dashboard global settings (editable at runtime via the dashboard UI)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubernetes-dashboard-web-settings
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+data: {}
+
+---
+# Kong DBless gateway config — routes all traffic to the correct backend service
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kong-dbless-config
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+data:
+  kong.yml: |
+    _format_version: "3.0"
+    services:
+      - name: auth
+        host: kubernetes-dashboard-auth
+        port: 8000
+        protocol: http
+        routes:
+          - name: authLogin
+            paths:
+              - /api/v1/login
+            strip_path: false
+          - name: authCsrf
+            paths:
+              - /api/v1/csrftoken/login
+            strip_path: false
+          - name: authMe
+            paths:
+              - /api/v1/me
+            strip_path: false
+      - name: api
+        host: kubernetes-dashboard-api
+        port: 8000
+        protocol: http
+        routes:
+          - name: api
+            paths:
+              - /api
+            strip_path: false
+          - name: metrics
+            paths:
+              - /metrics
+            strip_path: false
+      - name: web
+        host: kubernetes-dashboard-web
+        port: 8080
+        protocol: http
+        routes:
+          - name: root
+            paths:
+              - /
+            strip_path: false
