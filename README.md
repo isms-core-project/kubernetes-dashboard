@@ -6,6 +6,16 @@ Production deployment manifests for the Kubernetes Dashboard — a maintained co
 
 ---
 
+## Screenshots
+
+### Sign In
+![Sign in screen](screenshots/k8s_dashboard_logon.png)
+
+### Workload Overview
+![Dashboard home](screenshots/k8s_dashboard_home.png)
+
+---
+
 ## Architecture
 
 Five pods in the `kubernetes-dashboard` namespace, fronted by a Kong API gateway:
