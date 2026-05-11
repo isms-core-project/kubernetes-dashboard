@@ -87,13 +87,12 @@ spec:
 #
 # Choose the access mode that fits your cluster:
 #
-#   A) MetalLB (bare-metal, on-prem)
-#      Uncomment the annotations block and set your IP.
-#      type: LoadBalancer assigns the IP via MetalLB.
+#   A) MetalLB (bare-metal, on-prem) ← recommended for self-hosted clusters
+#      Install MetalLB, configure an IP pool, then uncomment the annotation and set your IP.
+#      Full setup instructions: DEPLOY.md → LoadBalancer Options → MetalLB Setup
 #
 #   B) Cloud LoadBalancer (AWS, GCP, Azure, etc.)
-#      Leave annotations commented out.
-#      type: LoadBalancer is enough — the cloud assigns an IP automatically.
+#      Leave annotations commented out — the cloud assigns an IP automatically.
 #
 #   C) NodePort (no LoadBalancer controller, local dev)
 #      Change type to NodePort and remove/ignore annotations.

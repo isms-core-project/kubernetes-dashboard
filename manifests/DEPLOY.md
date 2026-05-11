@@ -63,7 +63,63 @@ All 5 pods (auth, api, web, metrics-scraper, kong) should reach Running.
 
 ## Access
 
-Dashboard is at `http://10.0.0.60` — MetalLB assigns the IP to the Kong proxy LoadBalancer.
+The dashboard is served by the Kong proxy LoadBalancer. Get the assigned IP:
+
+```bash
+kubectl get svc kubernetes-dashboard-kong-proxy -n kubernetes-dashboard
+```
+
+### LoadBalancer Options
+
+See `50-services.yaml` for the full options (A/B/C). The recommended approach for self-hosted clusters is MetalLB.
+
+#### MetalLB Setup (recommended for bare-metal / on-prem)
+
+**1. Install MetalLB (latest release):**
+```bash
+MetalLB_RTAG=$(curl -s https://api.github.com/repos/metallb/metallb/releases/latest \
+  | grep tag_name | cut -d '"' -f 4 | sed 's/v//')
+curl -s https://raw.githubusercontent.com/metallb/metallb/v${MetalLB_RTAG}/config/manifests/metallb-native.yaml \
+  | kubectl apply -f -
+```
+
+**2. Configure an IP pool** (adjust the range to suit your network):
+```bash
+kubectl apply -f - <<EOF
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: production
+  namespace: metallb-system
+spec:
+  addresses:
+    - 192.168.1.200-192.168.1.220
+  autoAssign: true
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: l2-advert
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - production
+EOF
+```
+
+**3. Uncomment and set your IP** in `50-services.yaml`:
+```yaml
+annotations:
+  metallb.io/loadBalancerIPs: "192.168.1.200"
+```
+
+#### Cloud LoadBalancer (AWS / GCP / Azure)
+
+No annotation needed — leave the `annotations` block commented out. The cloud provider assigns an IP automatically when `type: LoadBalancer` is applied.
+
+#### NodePort (no LoadBalancer controller)
+
+Change `type: LoadBalancer` to `type: NodePort` in `50-services.yaml`. Access via `http://<any-node-ip>:<nodePort>` — the port is assigned by Kubernetes and visible in `kubectl get svc -n kubernetes-dashboard`.
 
 ## Get Login Token
 
