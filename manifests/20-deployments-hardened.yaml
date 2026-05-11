@@ -31,6 +31,8 @@ spec:
         app.kubernetes.io/component: auth
     spec:
       automountServiceAccountToken: true
+      # imagePullSecrets:              # Uncomment if using a private registry
+      #   - name: registry-credentials
       priorityClassName: system-cluster-critical
       securityContext:
         runAsNonRoot: true
@@ -134,6 +136,8 @@ spec:
     spec:
       serviceAccountName: kubernetes-dashboard-api
       automountServiceAccountToken: true
+      # imagePullSecrets:              # Uncomment if using a private registry
+      #   - name: registry-credentials
       priorityClassName: system-cluster-critical
       securityContext:
         runAsNonRoot: true
@@ -248,6 +252,8 @@ spec:
         app.kubernetes.io/component: web
     spec:
       automountServiceAccountToken: false
+      # imagePullSecrets:              # Uncomment if using a private registry
+      #   - name: registry-credentials
       priorityClassName: system-cluster-critical
       securityContext:
         runAsNonRoot: true
@@ -349,6 +355,8 @@ spec:
     spec:
       serviceAccountName: kubernetes-dashboard-metrics-scraper
       automountServiceAccountToken: true
+      # imagePullSecrets:              # Uncomment if using a private registry
+      #   - name: registry-credentials
       priorityClassName: system-cluster-critical
       securityContext:
         runAsNonRoot: true
@@ -449,6 +457,8 @@ spec:
         app.kubernetes.io/name: kubernetes-dashboard-kong
         app.kubernetes.io/component: kong
     spec:
+      # imagePullSecrets:              # Uncomment if using a private registry
+      #   - name: registry-credentials
       priorityClassName: system-cluster-critical
       securityContext:
         runAsNonRoot: true

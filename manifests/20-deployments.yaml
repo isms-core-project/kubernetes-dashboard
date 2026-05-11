@@ -29,6 +29,8 @@ spec:
         app.kubernetes.io/component: auth
     spec:
       automountServiceAccountToken: true
+      # imagePullSecrets:              # Uncomment if using a private registry
+      #   - name: registry-credentials
       securityContext:
         runAsNonRoot: true
         seccompProfile:
@@ -106,6 +108,8 @@ spec:
     spec:
       serviceAccountName: kubernetes-dashboard-api
       automountServiceAccountToken: true
+      # imagePullSecrets:              # Uncomment if using a private registry
+      #   - name: registry-credentials
       securityContext:
         runAsNonRoot: true
         seccompProfile:
@@ -192,6 +196,8 @@ spec:
         app.kubernetes.io/component: web
     spec:
       automountServiceAccountToken: false
+      # imagePullSecrets:              # Uncomment if using a private registry
+      #   - name: registry-credentials
       securityContext:
         runAsNonRoot: true
         seccompProfile:
@@ -265,6 +271,8 @@ spec:
     spec:
       serviceAccountName: kubernetes-dashboard-metrics-scraper
       automountServiceAccountToken: true
+      # imagePullSecrets:              # Uncomment if using a private registry
+      #   - name: registry-credentials
       securityContext:
         runAsNonRoot: true
         seccompProfile:
