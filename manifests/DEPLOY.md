@@ -23,7 +23,8 @@ Use `20-deployments-hardened.yaml` instead of `20-deployments.yaml`, and apply t
 kubectl apply -f 00-namespace.yaml
 kubectl apply -f 01-secrets.yaml
 kubectl apply -f 02-configmap.yaml
-kubectl apply -f 03-ai-secret.yaml       # Optional — AI assistant (see below)
+kubectl apply -f 03-ai-secret.yaml            # Optional — AI assistant (see below)
+kubectl apply -f 04-notifications-secret.yaml # Optional — email notifications (see below)
 kubectl apply -f 10-rbac.yaml
 kubectl apply -f 20-deployments-hardened.yaml
 kubectl apply -f 50-services.yaml
@@ -63,69 +64,7 @@ All 5 pods (auth, api, web, metrics-scraper, kong) should reach Running.
 
 ## Access
 
-The dashboard is served by the Kong proxy LoadBalancer. Get the assigned IP:
-
-```bash
-kubectl get svc kubernetes-dashboard-kong-proxy -n kubernetes-dashboard
-```
-
-### LoadBalancer Options
-
-See `50-services.yaml` for the full options (A/B/C). The recommended approach for self-hosted clusters is MetalLB.
-
-#### MetalLB Setup (recommended for bare-metal / on-prem)
-
-**1. Install MetalLB (latest release):**
-```bash
-MetalLB_RTAG=$(curl -s https://api.github.com/repos/metallb/metallb/releases/latest \
-  | grep tag_name | cut -d '"' -f 4 | sed 's/v//')
-curl -s https://raw.githubusercontent.com/metallb/metallb/v${MetalLB_RTAG}/config/manifests/metallb-native.yaml \
-  | kubectl apply -f -
-```
-
-**2. Configure an IP pool** (adjust the range and interface to suit your network):
-```bash
-kubectl apply -f - <<EOF
-apiVersion: metallb.io/v1beta1
-kind: IPAddressPool
-metadata:
-  name: production
-  namespace: metallb-system
-spec:
-  addresses:
-    - 192.168.1.200-192.168.1.220
-  autoAssign: true
----
-apiVersion: metallb.io/v1beta1
-kind: L2Advertisement
-metadata:
-  name: l2-advert
-  namespace: metallb-system
-spec:
-  ipAddressPools:
-    - production
-  interfaces:
-    - eth0    # Lock to your LAN interface — check with: ip link show
-EOF
-```
-
-> **Multi-NIC nodes:** If your nodes have both a wired and wireless interface, always lock
-> `interfaces` to the LAN NIC. Otherwise MetalLB advertises on all interfaces and you get
-> unpredictable ARP responses. Common names: `eth0`, `eno1`, `enp2s0` — check with `ip link show`.
-
-**3. Uncomment and set your IP** in `50-services.yaml`:
-```yaml
-annotations:
-  metallb.io/loadBalancerIPs: "192.168.1.200"
-```
-
-#### Cloud LoadBalancer (AWS / GCP / Azure)
-
-No annotation needed — leave the `annotations` block commented out. The cloud provider assigns an IP automatically when `type: LoadBalancer` is applied.
-
-#### NodePort (no LoadBalancer controller)
-
-Change `type: LoadBalancer` to `type: NodePort` in `50-services.yaml`. Access via `http://<any-node-ip>:<nodePort>` — the port is assigned by Kubernetes and visible in `kubectl get svc -n kubernetes-dashboard`.
+Dashboard is at `http://10.0.0.60` — MetalLB assigns the IP to the Kong proxy LoadBalancer.
 
 ## Get Login Token
 
@@ -156,6 +95,40 @@ kubectl rollout restart deployment/kubernetes-dashboard-api -n kubernetes-dashbo
 ```
 
 Model: `claude-sonnet-4-6`. Pod context is automatically injected when the drawer is opened from a pod detail page (`/workloads/pods/:namespace/:name`).
+
+## Health Digest + Event Alert Notifications
+
+Sends cluster health digest emails (daily) and real-time event alerts via the **Microsoft Graph API**.
+All fields are optional — the feature is a graceful no-op if `GRAPH_TENANT_ID` is not set.
+
+**Azure App Registration requirements:**
+- API permission: `Mail.Send` (Application, not Delegated)
+- `MAIL_FROM` must be a licensed mailbox in the tenant
+
+Edit `04-notifications-secret.yaml` with real credentials, then:
+
+```bash
+kubectl apply -f 04-notifications-secret.yaml
+kubectl rollout restart deployment/kubernetes-dashboard-api -n kubernetes-dashboard
+```
+
+The Settings → Notifications tab shows config status and a **Send test email** button.
+Toggle individual event alert types under **Event Alerts** in the same tab.
+
+| Alert type | Default |
+|---|---|
+| Pod Crash / CrashLoopBackOff | ON |
+| OOM Kill | ON |
+| Node Not Ready | ON |
+| Image Pull Failure | OFF |
+| Storage Issue (PVC) | OFF |
+
+Each alert is deduplicated — one email per hour per affected workload.
+
+## Global Settings
+
+Settings → Global tab persists: cluster name, default namespace, items per page, auto-refresh interval.
+Stored in the `kubernetes-dashboard-web-settings` ConfigMap — no pod restart required.
 
 ## Update Images
 

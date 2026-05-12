@@ -30,6 +30,7 @@ spec:
         app.kubernetes.io/name: kubernetes-dashboard-auth
         app.kubernetes.io/component: auth
     spec:
+      serviceAccountName: kubernetes-dashboard-auth
       automountServiceAccountToken: true
       # imagePullSecrets:              # Uncomment if using a private registry
       #   - name: registry-credentials
@@ -184,6 +185,49 @@ spec:
             #   value: "http://proxy.example.com:3128"
             # - name: NO_PROXY
             #   value: "localhost,127.0.0.1,10.0.0.0/8,.cluster.local"
+            # ── Notifications (optional) ──────────────────────────────────────────────
+            - name: GRAPH_TENANT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: kubernetes-dashboard-notifications
+                  key: GRAPH_TENANT_ID
+                  optional: true
+            - name: GRAPH_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: kubernetes-dashboard-notifications
+                  key: GRAPH_CLIENT_ID
+                  optional: true
+            - name: GRAPH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: kubernetes-dashboard-notifications
+                  key: GRAPH_CLIENT_SECRET
+                  optional: true
+            - name: MAIL_FROM
+              valueFrom:
+                secretKeyRef:
+                  name: kubernetes-dashboard-notifications
+                  key: MAIL_FROM
+                  optional: true
+            - name: MAIL_FROM_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: kubernetes-dashboard-notifications
+                  key: MAIL_FROM_NAME
+                  optional: true
+            - name: MAIL_TO
+              valueFrom:
+                secretKeyRef:
+                  name: kubernetes-dashboard-notifications
+                  key: MAIL_TO
+                  optional: true
+            - name: NOTIFY_INTERVAL_H
+              valueFrom:
+                secretKeyRef:
+                  name: kubernetes-dashboard-notifications
+                  key: NOTIFY_INTERVAL_H
+                  optional: true
             - name: GOMAXPROCS
               valueFrom:
                 resourceFieldRef:
@@ -258,6 +302,7 @@ spec:
         app.kubernetes.io/name: kubernetes-dashboard-web
         app.kubernetes.io/component: web
     spec:
+      serviceAccountName: kubernetes-dashboard-web
       automountServiceAccountToken: false
       # imagePullSecrets:              # Uncomment if using a private registry
       #   - name: registry-credentials
@@ -464,6 +509,8 @@ spec:
         app.kubernetes.io/name: kubernetes-dashboard-kong
         app.kubernetes.io/component: kong
     spec:
+      serviceAccountName: kubernetes-dashboard-kong
+      automountServiceAccountToken: false
       # imagePullSecrets:              # Uncomment if using a private registry
       #   - name: registry-credentials
       priorityClassName: system-cluster-critical

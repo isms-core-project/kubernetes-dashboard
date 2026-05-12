@@ -11,8 +11,50 @@ Production deployment manifests for the Kubernetes Dashboard — a maintained co
 ### Sign In
 ![Sign in screen](screenshots/k8s_dashboard_logon.png)
 
-### Workload Overview
-![Dashboard home](screenshots/k8s_dashboard_home.png)
+### Overview
+Cluster resource donuts (CPU / Memory / Pods / Nodes) plus workload status bubbles and per-kind counts at a glance.
+
+![Dashboard overview](screenshots/k8s_dashboard_home.png)
+
+### Cluster Map
+Namespace-scoped topology view of every Deployment, DaemonSet, and StatefulSet — with Error/Warning filter and zoom controls.
+
+![Cluster map](screenshots/k8s_dashboard_map.png)
+
+### Pods
+Full pod list with live CPU/Memory sparklines, restart count, node assignment, and inline log/shell/edit/delete actions.
+
+![Pods list](screenshots/k8s_dashboard_pods.png)
+
+### Nodes
+Per-node CPU and memory request percentages, usage sparklines, pod capacity, and readiness status.
+
+![Nodes list](screenshots/k8s_dashboard_nodes.png)
+
+### Policy Audit
+Polaris-native security scoring (0–100) per workload — danger and warning counts, namespace tabs, expandable check details.
+
+![Policy audit](screenshots/k8s_dashboard_policy_audit.png)
+
+### Resource Efficiency
+Goldilocks-style request/limit/actual comparison for every container — No Limits, Hot, Cold, and OK verdicts with CSV export.
+
+![Resource efficiency](screenshots/k8s_dashboard_resource_efficiency.png)
+
+### RBAC Viewer
+Cluster-wide role binding table — subject, kind, scope, binding, and rule expansion with wildcard detection.
+
+![RBAC viewer](screenshots/k8s_dashboard_rbac_viewer.png)
+
+### Certificate Tracker
+TLS secrets scanned via `crypto/x509` — common name, SANs, issuer, expiry date, days remaining, and status badges.
+
+![Certificate tracker](screenshots/k8s_dashboard_cert_tracker.png)
+
+### Event Timeline
+Live cluster event feed with time-bucket grouping, Warning highlighting, namespace filter, and auto-refresh.
+
+![Event timeline](screenshots/k8s_dashboard_events_timeline.png)
 
 ---
 
@@ -80,6 +122,7 @@ kubectl get secret admin-user -n kubernetes-dashboard \
 - Pod log streaming and interactive shell (xterm.js)
 - Cluster Map, Policy Audit, Resource Efficiency, RBAC Viewer, Certificate Tracker, Event Timeline
 - AI Assistant (Claude, SSE streaming — requires Anthropic API key)
+- Health digest and event alert notifications via Microsoft Graph API
 
 ---
 

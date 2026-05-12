@@ -170,8 +170,9 @@ spec:
       ports:
         - port: 8000
           protocol: TCP
-    # Kubernetes API server (443 via ClusterIP, 6443 direct to control plane)
-    # and Anthropic API (api.anthropic.com:443) — both use port 443/6443
+    # Kubernetes API server (443 via ClusterIP, 6443 direct to control plane),
+    # Anthropic API (api.anthropic.com:443), and Microsoft Graph API
+    # (login.microsoftonline.com:443 + graph.microsoft.com:443) for notifications
     - ports:
         - port: 443
           protocol: TCP

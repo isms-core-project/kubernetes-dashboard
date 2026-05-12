@@ -31,6 +31,11 @@ rules:
       - kubernetes-dashboard-metrics-scraper
       - http:kubernetes-dashboard-metrics-scraper
     verbs: ["get"]
+  # Allow Dashboard API to read and update the global settings ConfigMap
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["kubernetes-dashboard-web-settings"]
+    verbs: ["get", "update", "create"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -138,3 +143,95 @@ subjects:
   - kind: ServiceAccount
     name: kubernetes-dashboard-metrics-scraper
     namespace: kubernetes-dashboard
+
+# ── AUTH ──────────────────────────────────────────────────────────────────────
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubernetes-dashboard-auth
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/component: auth
+
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: kubernetes-dashboard-auth
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/component: auth
+rules:
+  # Auth pod validates user bearer tokens by submitting TokenReview to the API server
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubernetes-dashboard-auth
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/component: auth
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubernetes-dashboard-auth
+subjects:
+  - kind: ServiceAccount
+    name: kubernetes-dashboard-auth
+    namespace: kubernetes-dashboard
+
+# ── API ClusterRole — needed for notification scheduler audit report ──────────
+
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: kubernetes-dashboard-api
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/component: api
+rules:
+  # Audit report lists workloads across all namespaces for health digest notifications
+  - apiGroups: ["apps"]
+    resources: ["deployments", "daemonsets", "statefulsets"]
+    verbs: ["list"]
+  # Event watcher watches Warning events cluster-wide for alert notifications
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubernetes-dashboard-api
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/component: api
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubernetes-dashboard-api
+subjects:
+  - kind: ServiceAccount
+    name: kubernetes-dashboard-api
+    namespace: kubernetes-dashboard
+
+# ── KONG ──────────────────────────────────────────────────────────────────────
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubernetes-dashboard-kong
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/component: kong
