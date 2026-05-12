@@ -2,6 +2,20 @@
 
 No Helm. Apply files in order and wait between stages.
 
+## Prerequisites
+
+metrics-server must be running in `kube-system` for the dashboard's CPU/memory current-usage data to work.
+K3s includes it by default — skip this on K3s. On native Kubernetes (kubeadm, Talos, etc.) apply it first:
+
+```bash
+kubectl apply -f 00-prereqs-metrics-server.yaml
+kubectl rollout status deployment/metrics-server -n kube-system
+```
+
+Safe to run on clusters that already have metrics-server — `kubectl apply` will no-op unchanged resources.
+
+---
+
 ## Deploy (Standard)
 
 ```bash
@@ -38,20 +52,81 @@ probes on all containers. Kong cannot have `readOnlyRootFilesystem` (writes lua 
 
 ### NetworkPolicy
 
-`99-network-policy.yaml` enforces least-privilege traffic for all five pods:
+`99-network-policy.yaml` enforces least-privilege traffic for all pods:
 
 | Pod | Ingress | Egress |
 |---|---|---|
 | kong | anywhere (LoadBalancer) | auth, api, web pods + DNS |
 | web | kong only | DNS only |
 | auth | kong only | k8s API server (443/6443) + DNS |
-| api | kong only | metrics-scraper + k8s API server (443/6443) + DNS |
-| metrics-scraper | api only | everywhere (must scrape all namespaces) |
+| api | kong only | metrics-scraper + victoriametrics (8428) + k8s API server (443/6443) + DNS |
+| metrics-scraper | api only | everywhere (must scrape all namespaces; covers VM push) |
+| victoriametrics | api + metrics-scraper (8428) | none |
 
 To apply or remove independently:
 ```bash
 kubectl apply -f 99-network-policy.yaml
 kubectl delete -f 99-network-policy.yaml
+```
+
+---
+
+## VictoriaMetrics (Optional — Historical Metrics + Sparklines)
+
+VictoriaMetrics is an **opt-in** time-series backend. When deployed, the pod detail page gains
+CPU and memory sparklines with a 1h/6h/24h/7d time range selector. Without it, the dashboard
+works exactly as before — no UI difference.
+
+### Deploy VictoriaMetrics
+
+```bash
+kubectl apply -f 25-victoriametrics.yaml
+kubectl rollout status statefulset/kubernetes-dashboard-victoriametrics -n kubernetes-dashboard
+```
+
+This creates a StatefulSet with a **2Gi Longhorn PVC** and a ClusterIP Service. Data is retained
+for 30 days by default (configurable via `-retentionPeriod` in the StatefulSet args).
+
+### Enable the feature
+
+`VM_ENDPOINT` env var is already set in `20-deployments-hardened.yaml`:
+
+```yaml
+- name: VM_ENDPOINT
+  value: "http://kubernetes-dashboard-victoriametrics:8428"
+```
+
+It is present on both the **api** and **metrics-scraper** containers. If VictoriaMetrics is not
+deployed, simply remove or blank this env var — the dashboard falls back to SQLite with no change.
+
+After applying the deployment manifest, restart both pods to pick up the env var:
+
+```bash
+kubectl rollout restart deployment/kubernetes-dashboard-api -n kubernetes-dashboard
+kubectl rollout restart deployment/kubernetes-dashboard-metrics-scraper -n kubernetes-dashboard  # wait for this before data appears
+```
+
+### Verify data is flowing
+
+Give the scraper one full cycle (~60 seconds), then:
+
+```bash
+# List metric names ingested — should show dashboard_pod_* and dashboard_node_*
+curl http://<victoriametrics-pod-ip>:8428/api/v1/label/__name__/values
+
+# Or via kubectl port-forward:
+kubectl port-forward svc/kubernetes-dashboard-victoriametrics 8428:8428 -n kubernetes-dashboard
+curl http://localhost:8428/api/v1/label/__name__/values
+```
+
+### Disable / remove VictoriaMetrics
+
+Remove `VM_ENDPOINT` from `20-deployments-hardened.yaml`, apply, then restart api and metrics-scraper.
+The StatefulSet and PVC can be deleted independently when you're ready:
+
+```bash
+kubectl delete -f 25-victoriametrics.yaml
+kubectl delete pvc storage-kubernetes-dashboard-victoriametrics-0 -n kubernetes-dashboard
 ```
 
 ## Verify

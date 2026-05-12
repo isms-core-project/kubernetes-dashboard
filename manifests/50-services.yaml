@@ -83,33 +83,19 @@ spec:
       protocol: TCP
 
 ---
-# Kong proxy — public entry point for the dashboard
-#
-# Choose the access mode that fits your cluster:
-#
-#   A) MetalLB (bare-metal, on-prem) ← recommended for self-hosted clusters
-#      Install MetalLB, configure an IP pool, then uncomment the annotation and set your IP.
-#      Full setup instructions: DEPLOY.md → LoadBalancer Options → MetalLB Setup
-#
-#   B) Cloud LoadBalancer (AWS, GCP, Azure, etc.)
-#      Leave annotations commented out — the cloud assigns an IP automatically.
-#
-#   C) NodePort (no LoadBalancer controller, local dev)
-#      Change type to NodePort and remove/ignore annotations.
-#      Access via http://<node-ip>:<nodePort>
-#
+# Kong proxy — LoadBalancer entry point on 10.0.0.60 (MetalLB)
 apiVersion: v1
 kind: Service
 metadata:
   name: kubernetes-dashboard-kong-proxy
   namespace: kubernetes-dashboard
-  # annotations:
-  #   metallb.io/loadBalancerIPs: "x.x.x.x"   # MetalLB only — set your desired IP
+  annotations:
+    metallb.io/loadBalancerIPs: "10.0.0.60"
   labels:
     app.kubernetes.io/part-of: kubernetes-dashboard
     app.kubernetes.io/component: kong
 spec:
-  type: LoadBalancer    # Change to NodePort if you have no LoadBalancer controller
+  type: LoadBalancer
   selector:
     app.kubernetes.io/part-of: kubernetes-dashboard
     app.kubernetes.io/name: kubernetes-dashboard-kong

@@ -228,6 +228,11 @@ spec:
                   name: kubernetes-dashboard-notifications
                   key: NOTIFY_INTERVAL_H
                   optional: true
+            # ── VictoriaMetrics (optional) ────────────────────────────────────────────
+            # Set to enable historical metrics, sparklines, and trend arrows.
+            # Remove (or leave blank) to keep the default SQLite-only behaviour.
+            # - name: VM_ENDPOINT
+            #   value: "http://kubernetes-dashboard-victoriametrics:8428"
             - name: GOMAXPROCS
               valueFrom:
                 resourceFieldRef:
@@ -432,6 +437,10 @@ spec:
             - containerPort: 8000
               protocol: TCP
           env:
+            # ── VictoriaMetrics (optional) ────────────────────────────────────────────
+            # Must match the value set on the api container above.
+            # - name: VM_ENDPOINT
+            #   value: "http://kubernetes-dashboard-victoriametrics:8428"
             - name: GOMAXPROCS
               valueFrom:
                 resourceFieldRef:

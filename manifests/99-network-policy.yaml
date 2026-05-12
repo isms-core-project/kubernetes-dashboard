@@ -139,7 +139,7 @@ spec:
         - port: 6443
           protocol: TCP
 
-# ── API — ingress from Kong, egress to metrics-scraper + k8s API + Anthropic ─
+# ── API — ingress from Kong, egress to metrics-scraper + VictoriaMetrics + k8s API + Anthropic ─
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -169,6 +169,14 @@ spec:
               app.kubernetes.io/name: kubernetes-dashboard-metrics-scraper
       ports:
         - port: 8000
+          protocol: TCP
+    # VictoriaMetrics (optional — only active when VM_ENDPOINT is set)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kubernetes-dashboard-victoriametrics
+      ports:
+        - port: 8428
           protocol: TCP
     # Kubernetes API server (443 via ClusterIP, 6443 direct to control plane),
     # Anthropic API (api.anthropic.com:443), and Microsoft Graph API
@@ -205,4 +213,38 @@ spec:
           protocol: TCP
   egress:
     # Broad egress required — must scrape metrics.k8s.io across all namespaces
+    # (also covers VictoriaMetrics push on port 8428 when VM_ENDPOINT is set)
     - {}
+
+# ── VictoriaMetrics — ingress from API + metrics-scraper, no egress needed ───
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kubernetes-dashboard-victoriametrics
+  namespace: kubernetes-dashboard
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kubernetes-dashboard-victoriametrics
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # API pod reads historical metrics via PromQL
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kubernetes-dashboard-api
+      ports:
+        - port: 8428
+          protocol: TCP
+    # Metrics-scraper pushes data via remote_write
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kubernetes-dashboard-metrics-scraper
+      ports:
+        - port: 8428
+          protocol: TCP
+  egress: []
