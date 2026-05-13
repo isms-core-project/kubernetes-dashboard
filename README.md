@@ -2,8 +2,6 @@
 
 Production deployment manifests for the Kubernetes Dashboard — a maintained continuation of the archived [kubernetes-retired/dashboard](https://github.com/kubernetes-retired/dashboard), rebuilt with React 19 and Material UI v6.
 
-**Source repository:** [isms-core-project/kubernetes-dashboard-factory](https://github.com/isms-core-project/kubernetes-dashboard-factory)
-
 ---
 
 ## Screenshots
@@ -37,7 +35,7 @@ Polaris-native security scoring (0–100) per workload — danger and warning co
 ![Policy audit](screenshots/k8s_dashboard_policy_audit.png)
 
 ### Resource Efficiency
-Goldilocks-style request/limit/actual comparison for every container — No Limits, Hot, Cold, and OK verdicts with CSV export.
+Goldilocks-style request/limit/actual comparison for every container — No Limits, Over-Provisioned, Under-Provisioned, and OK verdicts with CSV export.
 
 ![Resource efficiency](screenshots/k8s_dashboard_resource_efficiency.png)
 
@@ -167,9 +165,12 @@ kubectl get secret admin-user -n kubernetes-dashboard \
 | **RBAC Viewer** | `/rbac` | All bindings with resolved rules, wildcard detection, filter by subject / scope / kind |
 | **Certificate Tracker** | `/certs` | TLS secrets parsed with `crypto/x509` — expiry countdown, status badges, SAN display |
 | **Event Timeline** | `/timeline` | Live event feed (5 s refresh), time-bucketed, warning highlight, text filter |
+| **Application Projects** | `/projects` | Per-namespace project cards with pod health, workload counts, and CPU/memory request totals |
+| **Storage Usage** | PV/PVC pages | Real-time PVC usage via kubelet stats — used/available/capacity per volume, aggregate donut chart |
 | **AI Assistant** | AppBar | Claude Sonnet via SSE streaming — pod spec and recent events auto-injected when on a pod page |
 | **Health Digest** | Background | Daily cluster health email (score, namespace table, top issues) via Microsoft Graph API |
 | **Event Alerts** | Background | Real-time email on CrashLoop / OOM / ImagePullBackOff / NodeNotReady / PVC issues; 1 h dedup |
+| **ISMS CORE Integration** | `GET /api/v1/summary` | Machine-readable cluster health snapshot — node status, pod phases, policy score, cert expiry counts |
 | **VictoriaMetrics** | Optional | Remote write from metrics-scraper; pod CPU/memory sparklines + trend arrows; opt-in via `VM_ENDPOINT` env var |
 
 ### Workload Actions
