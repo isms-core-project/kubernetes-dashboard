@@ -56,6 +56,26 @@ Live cluster event feed with time-bucket grouping, Warning highlighting, namespa
 
 ![Event timeline](screenshots/k8s_dashboard_events_timeline.png)
 
+### Application Projects
+Per-namespace project cards with pod health, workload counts, and CPU/memory request totals. System namespaces hidden by default.
+
+![Application projects](screenshots/k8s_dashboard_projects.png)
+
+### Kubescape Security
+Compliance scores and CVE findings per workload — auto-detected when Kubescape Operator is running.
+
+![Kubescape config scan](screenshots/k8s_dashboard_kubescape.png)
+
+### VictoriaMetrics Sparklines
+Pod CPU and memory sparklines with 1h/6h/24h/7d time range selector — opt-in via `VM_ENDPOINT`.
+
+![VictoriaMetrics sparklines](screenshots/k8s_dashboard_victoriametrics.png)
+
+### PVC Storage Usage
+Persistent Volume Claims with live usage bars sourced from the metrics server.
+
+![PVC storage usage](screenshots/k8s_dashboard_pvc.png)
+
 ---
 
 ## Architecture
