@@ -35,7 +35,7 @@ Polaris-native security scoring (0–100) per workload — danger and warning co
 ![Policy audit](screenshots/k8s_dashboard_policy_audit.png)
 
 ### Resource Efficiency
-Goldilocks-style request/limit/actual comparison for every container — No Limits, Over-Provisioned, Under-Provisioned, and OK verdicts with CSV export.
+Goldilocks-style request/limit/actual comparison for every container — No Limits, Hot, Cold, and OK verdicts with CSV export.
 
 ![Resource efficiency](screenshots/k8s_dashboard_resource_efficiency.png)
 
