@@ -16,17 +16,26 @@ Safe to run on clusters that already have metrics-server — `kubectl apply` wil
 
 ---
 
-## Deploy
+## Deploy (Standard)
 
 ```bash
-# 1. Namespace first
 kubectl apply -f 00-namespace.yaml
+kubectl apply -f 01-secrets.yaml
+kubectl apply -f 02-configmap.yaml
+kubectl apply -f 03-ai-secret.yaml       # Optional — AI assistant (see below)
+kubectl apply -f 10-rbac.yaml
+kubectl apply -f 20-deployments.yaml
+kubectl apply -f 50-services.yaml
+kubectl apply -f 60-admin-user.yaml
+```
 
-# 2. Generate the CSRF key (once — save it for future deploys to avoid invalidating sessions)
-kubectl -n kubernetes-dashboard create secret generic kubernetes-dashboard-csrf \
-  --from-literal=private.key="$(openssl rand 256 | base64 | tr -d '\n')"
+## Deploy (Hardened)
 
-# 3. Everything else
+Use `20-deployments-hardened.yaml` instead of `20-deployments.yaml`, and apply the NetworkPolicy last:
+
+```bash
+kubectl apply -f 00-namespace.yaml
+kubectl apply -f 01-secrets.yaml
 kubectl apply -f 02-configmap.yaml
 kubectl apply -f 03-ai-secret.yaml            # Optional — AI assistant (see below)
 kubectl apply -f 04-notifications-secret.yaml # Optional — email notifications (see below)
@@ -198,14 +207,30 @@ Stored in the `kubernetes-dashboard-web-settings` ConfigMap — no pod restart r
 
 ## Update Images
 
-All images use `imagePullPolicy: Always` — restart the deployments to pull the latest:
+Build and push from `kubernetes-dashboard-factory/`:
 
 ```bash
-kubectl rollout restart deployment/kubernetes-dashboard-api            -n kubernetes-dashboard
-kubectl rollout restart deployment/kubernetes-dashboard-web            -n kubernetes-dashboard
-kubectl rollout restart deployment/kubernetes-dashboard-auth           -n kubernetes-dashboard
+# GitHub Container Registry (default)
+./build.sh --ghcr                   # all images
+./build.sh --ghcr --web             # web only
+./build.sh --ghcr --api             # API only
+./build.sh --ghcr --api --web       # API + web
+./build.sh --ghcr v1.2.0            # versioned tag
+
+# Private registry (10.0.0.110:5000)
+./build.sh --local
+```
+
+After building, restart affected deployments:
+
+```bash
+kubectl rollout restart deployment/kubernetes-dashboard-api     -n kubernetes-dashboard
+kubectl rollout restart deployment/kubernetes-dashboard-web     -n kubernetes-dashboard
+kubectl rollout restart deployment/kubernetes-dashboard-auth    -n kubernetes-dashboard
 kubectl rollout restart deployment/kubernetes-dashboard-metrics-scraper -n kubernetes-dashboard
 ```
+
+All images use `imagePullPolicy: Always` so a restart picks up the latest tag.
 
 ## Kubescape Integration (Optional — Security Scanning)
 
