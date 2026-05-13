@@ -16,26 +16,17 @@ Safe to run on clusters that already have metrics-server — `kubectl apply` wil
 
 ---
 
-## Deploy (Standard)
+## Deploy
 
 ```bash
+# 1. Namespace first
 kubectl apply -f 00-namespace.yaml
-kubectl apply -f 01-secrets.yaml
-kubectl apply -f 02-configmap.yaml
-kubectl apply -f 03-ai-secret.yaml       # Optional — AI assistant (see below)
-kubectl apply -f 10-rbac.yaml
-kubectl apply -f 20-deployments.yaml
-kubectl apply -f 50-services.yaml
-kubectl apply -f 60-admin-user.yaml
-```
 
-## Deploy (Hardened)
+# 2. Generate the CSRF key (once — save it for future deploys to avoid invalidating sessions)
+kubectl -n kubernetes-dashboard create secret generic kubernetes-dashboard-csrf \
+  --from-literal=private.key="$(openssl rand 256 | base64 | tr -d '\n')"
 
-Use `20-deployments-hardened.yaml` instead of `20-deployments.yaml`, and apply the NetworkPolicy last:
-
-```bash
-kubectl apply -f 00-namespace.yaml
-kubectl apply -f 01-secrets.yaml
+# 3. Everything else
 kubectl apply -f 02-configmap.yaml
 kubectl apply -f 03-ai-secret.yaml            # Optional — AI assistant (see below)
 kubectl apply -f 04-notifications-secret.yaml # Optional — email notifications (see below)
@@ -207,16 +198,82 @@ Stored in the `kubernetes-dashboard-web-settings` ConfigMap — no pod restart r
 
 ## Update Images
 
-After a new build (`./build.sh --hub --api --web` etc.):
+All images use `imagePullPolicy: Always` — restart the deployments to pull the latest:
 
 ```bash
-kubectl rollout restart deployment/kubernetes-dashboard-api     -n kubernetes-dashboard
-kubectl rollout restart deployment/kubernetes-dashboard-web     -n kubernetes-dashboard
-kubectl rollout restart deployment/kubernetes-dashboard-auth    -n kubernetes-dashboard
+kubectl rollout restart deployment/kubernetes-dashboard-api            -n kubernetes-dashboard
+kubectl rollout restart deployment/kubernetes-dashboard-web            -n kubernetes-dashboard
+kubectl rollout restart deployment/kubernetes-dashboard-auth           -n kubernetes-dashboard
 kubectl rollout restart deployment/kubernetes-dashboard-metrics-scraper -n kubernetes-dashboard
 ```
 
-All images use `imagePullPolicy: Always` so a restart picks up the latest tag.
+## Kubescape Integration (Optional — Security Scanning)
+
+Detection-gated: the entire Security section (nav, workload cards, scan pages) appears automatically when
+Kubescape Operator is present. No dashboard config needed.
+
+### Deploy Kubescape Operator
+
+```bash
+helm repo add kubescape https://kubescape.github.io/helm-charts/
+helm install kubescape kubescape/kubescape-operator \
+  -n kubescape --create-namespace \
+  --set capabilities.relevancy=enable \
+  --set capabilities.networkPolicyService=enable
+```
+
+`relevancy` enables image vulnerability scanning scoped to running containers.
+`networkPolicyService` generates NetworkPolicy YAML from eBPF-observed traffic.
+
+First scan completes within a few minutes of operator startup.
+
+**Optional — continuous scan:** trigger scans on workload changes instead of waiting for the nightly cron:
+
+```bash
+helm upgrade kubescape kubescape/kubescape-operator \
+  -n kubescape \
+  --set capabilities.relevancy=enable \
+  --set capabilities.networkPolicyService=enable \
+  --set capabilities.continuousScan=enable
+```
+
+### What it provides
+
+| Feature | Location |
+|---|---|
+| Compliance score per workload | Security → Config Scan + workload detail cards |
+| CVE findings per workload | Security → Vulnerabilities + workload detail cards |
+| eBPF NetworkPolicy generator | Workload detail → Security card → Preview & Apply |
+
+### RBAC
+
+`10-rbac.yaml` already includes the permissions required for Kubescape:
+
+```yaml
+# Kubescape CRD reads (spdx.softwarecomposition.kubescape.io)
+- apiGroups: ["spdx.softwarecomposition.kubescape.io"]
+  resources: ["workloadconfigurationscansummaries", "workloadconfigurationscans",
+              "vulnerabilitymanifestsummaries", "vulnerabilitymanifests",
+              "generatednetworkpolicies"]
+  verbs: ["get", "list"]
+# NetworkPolicy apply (for Preview & Apply button)
+- apiGroups: ["networking.k8s.io"]
+  resources: ["networkpolicies"]
+  verbs: ["get", "create", "patch"]
+```
+
+### Remove Kubescape
+
+```bash
+helm uninstall kubescape -n kubescape
+kubectl delete namespace kubescape
+```
+
+The Security section disappears from the dashboard automatically.
+
+> **Note:** Trivy Operator is explicitly excluded. Do not substitute `aquasecurity.github.io` CRDs.
+
+---
 
 ## Tear Down
 

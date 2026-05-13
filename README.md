@@ -75,13 +75,18 @@ Browser
 
 ## Deploy
 
-Apply manifests in order:
+Images are published to GitHub Container Registry and pulled automatically — no build step needed.
 
 ```bash
+# 1. Create the namespace first
 kubectl apply -f manifests/00-namespace.yaml
-kubectl apply -f manifests/01-secrets.yaml
+
+# 2. Generate the CSRF key (once — save it for future deploys)
+kubectl -n kubernetes-dashboard create secret generic kubernetes-dashboard-csrf \
+  --from-literal=private.key="$(openssl rand 256 | base64 | tr -d '\n')"
+
+# 3. Apply the rest
 kubectl apply -f manifests/02-configmap.yaml
-kubectl apply -f manifests/03-ai-secret.yaml    # optional — AI assistant
 kubectl apply -f manifests/10-rbac.yaml
 kubectl apply -f manifests/20-deployments-hardened.yaml
 kubectl apply -f manifests/50-services.yaml
@@ -95,7 +100,7 @@ Verify all five pods reach Running:
 kubectl get all -n kubernetes-dashboard
 ```
 
-See [manifests/DEPLOY.md](manifests/DEPLOY.md) for the full runbook including AI assistant setup, image updates, and tear-down.
+See [manifests/DEPLOY.md](manifests/DEPLOY.md) for the full runbook including optional features, AI assistant setup, and tear-down.
 
 ---
 
@@ -118,11 +123,47 @@ kubectl get secret admin-user -n kubernetes-dashboard \
 
 ## Features
 
-- Workloads, Service, Config & Storage, Cluster resources — full CRUD and detail views
-- Pod log streaming and interactive shell (xterm.js)
-- Cluster Map, Policy Audit, Resource Efficiency, RBAC Viewer, Certificate Tracker, Event Timeline
-- AI Assistant (Claude, SSE streaming — requires Anthropic API key)
-- Health digest and event alert notifications via Microsoft Graph API
+### Standard Kubernetes Resources
+
+| Area | Details |
+|---|---|
+| **Workloads** | Cron Jobs, Daemon Sets, Deployments, Jobs, Pods, Replica Sets, Replication Controllers, Stateful Sets — full list + detail views |
+| **Service** | Ingresses, Ingress Classes, Services |
+| **Config & Storage** | Config Maps, Persistent Volume Claims, Secrets, Storage Classes |
+| **Cluster** | Cluster Roles/Bindings, Events, Namespaces, Network Policies, Nodes, Persistent Volumes, Roles/Bindings, Service Accounts |
+| **Custom Resource Definitions** | CRD list, detail, and per-CRD object browser |
+| **Gateway API** | GatewayClasses, Gateways, HTTPRoutes — shown automatically when `gateway.networking.k8s.io` CRDs are detected |
+| **Kubescape** | Config scan scores, CVE findings, eBPF NetworkPolicy generator — shown automatically when Kubescape Operator is running |
+| **Pod Logs** | Live streaming, timestamps, previous container, severity filter (ALL / ERROR / WARN / INFO / DEBUG), text filter, line count, download |
+| **Pod Shell** | Interactive xterm.js terminal, shell selector, connect / disconnect |
+
+### Native Extended Features
+
+| Feature | Route | Description |
+|---|---|---|
+| **Cluster Map** | `/map` | All workloads grouped by namespace as colour-coded health cards — zoom 40–150% |
+| **Policy Audit** | `/audit` | 14 Polaris-style security checks per workload, scored 0–100, filterable by severity |
+| **Resource Efficiency** | `/efficiency` | Goldilocks-style: CPU/memory requests vs limits vs actual, verdict chips, CSV export, trend arrows (↑↓→) when VictoriaMetrics is enabled |
+| **RBAC Viewer** | `/rbac` | All bindings with resolved rules, wildcard detection, filter by subject / scope / kind |
+| **Certificate Tracker** | `/certs` | TLS secrets parsed with `crypto/x509` — expiry countdown, status badges, SAN display |
+| **Event Timeline** | `/timeline` | Live event feed (5 s refresh), time-bucketed, warning highlight, text filter |
+| **AI Assistant** | AppBar | Claude Sonnet via SSE streaming — pod spec and recent events auto-injected when on a pod page |
+| **Health Digest** | Background | Daily cluster health email (score, namespace table, top issues) via Microsoft Graph API |
+| **Event Alerts** | Background | Real-time email on CrashLoop / OOM / ImagePullBackOff / NodeNotReady / PVC issues; 1 h dedup |
+| **VictoriaMetrics** | Optional | Remote write from metrics-scraper; pod CPU/memory sparklines + trend arrows; opt-in via `VM_ENDPOINT` env var |
+
+### Workload Actions
+
+All workload detail pages include RBAC-aware action buttons (disabled with tooltip when the user's token lacks permission):
+
+| Action | Deployments | DaemonSets | StatefulSets |
+|---|---|---|---|
+| Edit YAML / JSON | ✅ | ✅ | ✅ |
+| Delete | ✅ | ✅ | ✅ |
+| Restart (`kubectl rollout restart`) | ✅ | ✅ | ✅ |
+| Scale | ✅ | — | ✅ |
+| Rollback with revision history | ✅ | ✅ | ✅ |
+| Pause / Resume | ✅ | — | — |
 
 ---
 

@@ -30,15 +30,13 @@ spec:
     spec:
       serviceAccountName: kubernetes-dashboard-auth
       automountServiceAccountToken: true
-      # imagePullSecrets:              # Uncomment if using a private registry
-      #   - name: registry-credentials
       securityContext:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: kubernetes-dashboard-auth
-          image: ${REGISTRY}:dashboard-auth-${TAG}
+          image: ghcr.io/isms-core-project/kubernetes-dashboard:dashboard-auth-latest
           imagePullPolicy: Always
           ports:
             - name: auth
@@ -109,15 +107,13 @@ spec:
     spec:
       serviceAccountName: kubernetes-dashboard-api
       automountServiceAccountToken: true
-      # imagePullSecrets:              # Uncomment if using a private registry
-      #   - name: registry-credentials
       securityContext:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: kubernetes-dashboard-api
-          image: ${REGISTRY}:dashboard-api-${TAG}
+          image: ghcr.io/isms-core-project/kubernetes-dashboard:dashboard-api-latest
           imagePullPolicy: Always
           args:
             - --namespace=kubernetes-dashboard
@@ -248,15 +244,13 @@ spec:
     spec:
       serviceAccountName: kubernetes-dashboard-web
       automountServiceAccountToken: false
-      # imagePullSecrets:              # Uncomment if using a private registry
-      #   - name: registry-credentials
       securityContext:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: kubernetes-dashboard-web
-          image: ${REGISTRY}:dashboard-web-${TAG}
+          image: ghcr.io/isms-core-project/kubernetes-dashboard:dashboard-web-latest
           imagePullPolicy: Always
           ports:
             - name: web
@@ -323,15 +317,13 @@ spec:
     spec:
       serviceAccountName: kubernetes-dashboard-metrics-scraper
       automountServiceAccountToken: true
-      # imagePullSecrets:              # Uncomment if using a private registry
-      #   - name: registry-credentials
       securityContext:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: kubernetes-dashboard-metrics-scraper
-          image: ${REGISTRY}:dashboard-metrics-scraper-${TAG}
+          image: ghcr.io/isms-core-project/kubernetes-dashboard:dashboard-metrics-scraper-latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8000
