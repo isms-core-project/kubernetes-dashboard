@@ -83,14 +83,52 @@ spec:
       protocol: TCP
 
 ---
-# Kong proxy — LoadBalancer entry point on 10.0.0.60 (MetalLB)
+# ==============================================================================================================
+# MetalLB — Required for LoadBalancer services on bare-metal clusters
+#
+# INSTALL MetalLB:
+#   MetalLB_RTAG=$(curl -s https://api.github.com/repos/metallb/metallb/releases/latest | grep tag_name | cut -d '"' -f 4 | sed 's/v//')
+#   curl -s https://raw.githubusercontent.com/metallb/metallb/v${MetalLB_RTAG}/config/manifests/metallb-native.yaml | kubectl apply -f -
+#   kubectl get pods -n metallb-system --watch
+#
+# CONFIGURE IP pool and L2 advertisement (apply after MetalLB pods are ready):
+#
+#   kubectl apply -f - <<EOF
+#   apiVersion: metallb.io/v1beta1
+#   kind: IPAddressPool
+#   metadata:
+#     name: production
+#     namespace: metallb-system
+#   spec:
+#     addresses:
+#     - 10.0.0.60-10.0.0.89        # Adjust to your LAN range
+#     autoAssign: true
+#   ---
+#   apiVersion: metallb.io/v1beta1
+#   kind: L2Advertisement
+#   metadata:
+#     name: l2-advert
+#     namespace: metallb-system
+#   spec:
+#     ipAddressPools:
+#     - production
+#     interfaces:
+#     - eno1                         # Lock to LAN interface (adjust if needed)
+#   EOF
+#
+# PIN a specific IP for this service: uncomment the annotation below and replace <YOUR-IP>
+#   Example: metallb.io/loadBalancerIPs: "10.0.0.60"
+#   Choose any free IP from your MetalLB address pool
+# ==============================================================================================================
+
+# Kong proxy — LoadBalancer entry point
 apiVersion: v1
 kind: Service
 metadata:
   name: kubernetes-dashboard-kong-proxy
   namespace: kubernetes-dashboard
-  annotations:
-    metallb.io/loadBalancerIPs: "10.0.0.60"
+#  annotations:
+#    metallb.io/loadBalancerIPs: "<YOUR-IP>"
   labels:
     app.kubernetes.io/part-of: kubernetes-dashboard
     app.kubernetes.io/component: kong

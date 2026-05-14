@@ -180,7 +180,7 @@ With node-exporter: 5 dashboard pods + one node-exporter pod per node.
 
 ## Access
 
-Dashboard is at `http://10.0.0.60` — MetalLB assigns the IP to the Kong proxy LoadBalancer.
+Dashboard is at `http://<YOUR-IP>` — MetalLB assigns the IP to the Kong proxy LoadBalancer.
 The landing page is `/overview` — a PRTG-style cluster health summary with stat tiles, donut charts,
 and (when VictoriaMetrics + node-exporter are deployed) a live network traffic graph.
 
@@ -279,32 +279,6 @@ Each alert is deduplicated — one email per hour per affected workload.
 Settings → Global tab persists: cluster name, default namespace, items per page, auto-refresh interval.
 Stored in the `kubernetes-dashboard-web-settings` ConfigMap — no pod restart required.
 
-## Update Images
-
-Build and push from `kubernetes-dashboard-factory/`:
-
-```bash
-# GitHub Container Registry (default)
-./build.sh --ghcr                   # all images
-./build.sh --ghcr --web             # web only
-./build.sh --ghcr --api             # API only
-./build.sh --ghcr --api --web       # API + web
-./build.sh --ghcr v1.2.0            # versioned tag
-
-# Private registry (10.0.0.110:5000)
-./build.sh --local
-```
-
-After building, restart affected deployments:
-
-```bash
-kubectl rollout restart deployment/kubernetes-dashboard-api     -n kubernetes-dashboard
-kubectl rollout restart deployment/kubernetes-dashboard-web     -n kubernetes-dashboard
-kubectl rollout restart deployment/kubernetes-dashboard-auth    -n kubernetes-dashboard
-kubectl rollout restart deployment/kubernetes-dashboard-metrics-scraper -n kubernetes-dashboard
-```
-
-All images use `imagePullPolicy: Always` so a restart picks up the latest tag.
 
 ## Kubescape Integration (Optional — Security Scanning)
 

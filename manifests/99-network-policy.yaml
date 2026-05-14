@@ -58,7 +58,7 @@ spec:
     - Ingress
     - Egress
   ingress:
-    # LoadBalancer traffic from anywhere (MetalLB 10.0.0.60)
+    # LoadBalancer traffic from anywhere (MetalLB)
     - ports:
         - port: 8000
           protocol: TCP
