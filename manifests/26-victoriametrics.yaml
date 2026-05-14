@@ -4,13 +4,13 @@
 # If this is not deployed, the dashboard falls back to the existing SQLite path
 # with no UI change — just don't set VM_ENDPOINT in 20-deployments-hardened.yaml.
 #
-# Node-exporter scraping is built-in: deploy 26-node-exporter.yaml first, then this.
-# The kubernetes-dashboard-vm-sd ServiceAccount (created by 26-node-exporter.yaml)
+# Node-exporter scraping is built-in: deploy 25-node-exporter.yaml first, then this.
+# The kubernetes-dashboard-vm-sd ServiceAccount (created by 25-node-exporter.yaml)
 # is required — apply that manifest before this one.
 #
 # Apply:
-#   kubectl apply -f 26-node-exporter.yaml
-#   kubectl apply -f 25-victoriametrics.yaml
+#   kubectl apply -f 25-node-exporter.yaml
+#   kubectl apply -f 26-victoriametrics.yaml
 #   kubectl rollout status statefulset/kubernetes-dashboard-victoriametrics -n kubernetes-dashboard
 apiVersion: apps/v1
 kind: StatefulSet

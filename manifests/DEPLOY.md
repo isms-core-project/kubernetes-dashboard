@@ -82,15 +82,15 @@ works exactly as before — no UI difference.
 If you also want the Network Traffic graph, deploy node-exporter first (it creates the ServiceAccount VM needs):
 
 ```bash
-kubectl apply -f 26-node-exporter.yaml   # creates vm-sd ServiceAccount + scrape ConfigMap
-kubectl apply -f 25-victoriametrics.yaml
+kubectl apply -f 25-node-exporter.yaml   # creates vm-sd ServiceAccount + scrape ConfigMap
+kubectl apply -f 26-victoriametrics.yaml
 kubectl rollout status statefulset/kubernetes-dashboard-victoriametrics -n kubernetes-dashboard
 ```
 
 Node-exporter only is also fine — VM without node-exporter still works for pod CPU/memory sparklines:
 
 ```bash
-kubectl apply -f 25-victoriametrics.yaml
+kubectl apply -f 26-victoriametrics.yaml
 kubectl rollout status statefulset/kubernetes-dashboard-victoriametrics -n kubernetes-dashboard
 ```
 
@@ -135,7 +135,7 @@ Remove `VM_ENDPOINT` from `20-deployments-hardened.yaml`, apply, then restart ap
 The StatefulSet and PVC can be deleted independently when you're ready:
 
 ```bash
-kubectl delete -f 25-victoriametrics.yaml
+kubectl delete -f 26-victoriametrics.yaml
 kubectl delete pvc storage-kubernetes-dashboard-victoriametrics-0 -n kubernetes-dashboard
 ```
 
@@ -144,11 +144,11 @@ kubectl delete pvc storage-kubernetes-dashboard-victoriametrics-0 -n kubernetes-
 Deploys Prometheus `node_exporter` as a DaemonSet so VictoriaMetrics can scrape
 per-node network metrics. Required for the **Network Traffic** graph on the Overview page.
 
-Deploy **before** VictoriaMetrics — `26-node-exporter.yaml` creates the `kubernetes-dashboard-vm-sd`
-ServiceAccount that `25-victoriametrics.yaml` depends on.
+Deploy **before** VictoriaMetrics — `25-node-exporter.yaml` creates the `kubernetes-dashboard-vm-sd`
+ServiceAccount that `26-victoriametrics.yaml` depends on.
 
 ```bash
-kubectl apply -f 26-node-exporter.yaml
+kubectl apply -f 25-node-exporter.yaml
 kubectl rollout status daemonset/kubernetes-dashboard-node-exporter -n kubernetes-dashboard
 ```
 
@@ -160,7 +160,7 @@ The manifest includes:
 - `hostNetwork: true`, `hostPID: true`, non-root, `readOnlyRootFilesystem`
 - Tolerations for control-plane nodes
 
-`25-victoriametrics.yaml` already references the `kubernetes-dashboard-vm-scrape` ConfigMap
+`26-victoriametrics.yaml` already references the `kubernetes-dashboard-vm-scrape` ConfigMap
 and the `kubernetes-dashboard-vm-sd` ServiceAccount — no manual patching required.
 
 After ~60 seconds of first scrape, the Overview page Zone 3 (Network Traffic) auto-detects
