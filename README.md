@@ -98,8 +98,8 @@ Optional add-ons (all in the same namespace):
 
 | Add-on | Manifest | Enables |
 |---|---|---|
-| VictoriaMetrics | `25-victoriametrics.yaml` | Pod CPU/memory sparklines, trend arrows, network graph |
-| Node Exporter | `26-node-exporter.yaml` | Network Traffic graph on Overview page |
+| Node Exporter | `25-node-exporter.yaml` | Network Traffic graph on Overview page (deploy first) |
+| VictoriaMetrics | `26-victoriametrics.yaml` | Pod CPU/memory sparklines, trend arrows, network graph |
 
 ---
 
@@ -127,8 +127,8 @@ kubectl apply -f manifests/99-network-policy.yaml
 **Optional — historical metrics + Network Traffic graph:**
 
 ```bash
-kubectl apply -f manifests/26-node-exporter.yaml   # creates RBAC + scrape ConfigMap
-kubectl apply -f manifests/25-victoriametrics.yaml
+kubectl apply -f manifests/25-node-exporter.yaml   # creates RBAC + scrape ConfigMap
+kubectl apply -f manifests/26-victoriametrics.yaml
 ```
 
 Verify all pods reach Running:
