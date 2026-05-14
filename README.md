@@ -74,6 +74,11 @@ Persistent Volume Claims with live usage bars sourced from the kubelet stats API
 
 ![PVC storage usage](screenshots/k8s_dashboard_pvc.png)
 
+### Cluster Shell
+Full interactive bash terminal (xterm.js) exec'd directly into the dashboard pod. kubectl is pre-configured with your login token, so every command runs with your actual RBAC permissions — no separate kubeconfig or port-forward needed.
+
+![Cluster Shell](screenshots/k8s_dashboard_shell.png)
+
 ---
 
 ## Architecture
