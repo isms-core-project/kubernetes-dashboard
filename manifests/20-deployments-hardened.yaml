@@ -174,6 +174,11 @@ spec:
                   name: kubernetes-dashboard-ai
                   key: api-key
                   optional: true
+            # ── VictoriaMetrics (optional) ────────────────────────────────────────────
+            # Set to enable historical metrics and sparklines. Remove (or leave blank)
+            # to keep the default SQLite-only behaviour with no UI change.
+            - name: VM_ENDPOINT
+              value: "http://kubernetes-dashboard-victoriametrics:8428"
             # ── Proxy (optional) ─────────────────────────────────────────────────────
             # Required if your cluster has no direct outbound internet access.
             # The AI assistant calls api.anthropic.com:443 — route it through your proxy.
@@ -224,11 +229,6 @@ spec:
                   name: kubernetes-dashboard-notifications
                   key: NOTIFY_INTERVAL_H
                   optional: true
-            # ── VictoriaMetrics (optional) ────────────────────────────────────────────
-            # Set to enable historical metrics, sparklines, and trend arrows.
-            # Remove (or leave blank) to keep the default SQLite-only behaviour.
-            # - name: VM_ENDPOINT
-            #   value: "http://kubernetes-dashboard-victoriametrics:8428"
             - name: GOMAXPROCS
               valueFrom:
                 resourceFieldRef:
@@ -429,10 +429,6 @@ spec:
             - containerPort: 8000
               protocol: TCP
           env:
-            # ── VictoriaMetrics (optional) ────────────────────────────────────────────
-            # Must match the value set on the api container above.
-            # - name: VM_ENDPOINT
-            #   value: "http://kubernetes-dashboard-victoriametrics:8428"
             - name: GOMAXPROCS
               valueFrom:
                 resourceFieldRef:
@@ -443,6 +439,10 @@ spec:
                 resourceFieldRef:
                   resource: limits.memory
                   divisor: "1"
+            # ── VictoriaMetrics (optional) ────────────────────────────────────────────
+            # Must match the value set on the api container above.
+            - name: VM_ENDPOINT
+              value: "http://kubernetes-dashboard-victoriametrics:8428"
           livenessProbe:
             httpGet:
               scheme: HTTP

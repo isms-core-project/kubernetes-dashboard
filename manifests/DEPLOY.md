@@ -79,6 +79,16 @@ works exactly as before — no UI difference.
 
 ### Deploy VictoriaMetrics
 
+If you also want the Network Traffic graph, deploy node-exporter first (it creates the ServiceAccount VM needs):
+
+```bash
+kubectl apply -f 26-node-exporter.yaml   # creates vm-sd ServiceAccount + scrape ConfigMap
+kubectl apply -f 25-victoriametrics.yaml
+kubectl rollout status statefulset/kubernetes-dashboard-victoriametrics -n kubernetes-dashboard
+```
+
+Node-exporter only is also fine — VM without node-exporter still works for pod CPU/memory sparklines:
+
 ```bash
 kubectl apply -f 25-victoriametrics.yaml
 kubectl rollout status statefulset/kubernetes-dashboard-victoriametrics -n kubernetes-dashboard
@@ -129,6 +139,36 @@ kubectl delete -f 25-victoriametrics.yaml
 kubectl delete pvc storage-kubernetes-dashboard-victoriametrics-0 -n kubernetes-dashboard
 ```
 
+## Node Exporter (Optional — Network Traffic Graph)
+
+Deploys Prometheus `node_exporter` as a DaemonSet so VictoriaMetrics can scrape
+per-node network metrics. Required for the **Network Traffic** graph on the Overview page.
+
+Deploy **before** VictoriaMetrics — `26-node-exporter.yaml` creates the `kubernetes-dashboard-vm-sd`
+ServiceAccount that `25-victoriametrics.yaml` depends on.
+
+```bash
+kubectl apply -f 26-node-exporter.yaml
+kubectl rollout status daemonset/kubernetes-dashboard-node-exporter -n kubernetes-dashboard
+```
+
+The manifest includes:
+- `kubernetes-dashboard-vm-sd` ServiceAccount + ClusterRole for VM kubernetes_sd pod discovery
+- VM scrape ConfigMap (`kubernetes-dashboard-vm-scrape`) with `kubernetes_sd`, label relabelling, and virtual interface exclusion
+- Selective collector list (cpu, meminfo, diskstats, filesystem, netdev, uname, loadavg)
+- Talos-compatible: `--path.rootfs=/host` with host root mounted read-only
+- `hostNetwork: true`, `hostPID: true`, non-root, `readOnlyRootFilesystem`
+- Tolerations for control-plane nodes
+
+`25-victoriametrics.yaml` already references the `kubernetes-dashboard-vm-scrape` ConfigMap
+and the `kubernetes-dashboard-vm-sd` ServiceAccount — no manual patching required.
+
+After ~60 seconds of first scrape, the Overview page Zone 3 (Network Traffic) auto-detects
+physical NICs via VictoriaMetrics label values and shows live rx/tx bytes/s with a 1h/6h/24h/7d
+range toggle. Virtual interfaces (lo, veth, cni, flannel, etc.) are filtered out automatically.
+
+---
+
 ## Verify
 
 ```bash
@@ -136,10 +176,31 @@ kubectl get all -n kubernetes-dashboard
 ```
 
 All 5 pods (auth, api, web, metrics-scraper, kong) should reach Running.
+With node-exporter: 5 dashboard pods + one node-exporter pod per node.
 
 ## Access
 
 Dashboard is at `http://10.0.0.60` — MetalLB assigns the IP to the Kong proxy LoadBalancer.
+The landing page is `/overview` — a PRTG-style cluster health summary with stat tiles, donut charts,
+and (when VictoriaMetrics + node-exporter are deployed) a live network traffic graph.
+
+### Pages
+
+| Page | Path | Notes |
+|---|---|---|
+| Cluster Overview | `/overview` | Stat tiles, donut charts, network traffic graph |
+| Workloads | `/workloads` | Pods, Deployments, DaemonSets, StatefulSets, ReplicaSets, Jobs |
+| Services | `/services` | Services, Ingresses, Gateway API |
+| Config | `/config` | ConfigMaps, Secrets |
+| Storage | `/storage` | PVCs with real-time usage via kubelet stats proxy |
+| Projects | `/projects` | Namespace health cards (pods, CPU/mem, health) |
+| Security | `/security` | Kubescape Config Scan + Vulnerabilities (operator required) |
+| RBAC | `/rbac` | ClusterRoles, Roles, Bindings |
+| Registries | `/registries` | Docker registry secrets cross-referenced with pod imagePullSecrets |
+| Certificates | `/certs` | TLS cert expiry tracker across all namespaces |
+| Efficiency | `/efficiency` | Goldilocks-style CPU/memory right-sizing report |
+| Audit | `/audit` | Polaris-style policy compliance report |
+| Settings | `/settings` | Global config, notifications, event alert preferences |
 
 ## Get Login Token
 
@@ -170,6 +231,19 @@ kubectl rollout restart deployment/kubernetes-dashboard-api -n kubernetes-dashbo
 ```
 
 Model: `claude-sonnet-4-6`. Pod context is automatically injected when the drawer is opened from a pod detail page (`/workloads/pods/:namespace/:name`).
+
+## Rollback History
+
+DaemonSets and StatefulSets show a **Rollback** button on their detail pages.
+The dashboard reads `ControllerRevision` history from the API and lets you roll back to any
+previous revision without leaving the UI. No extra config required — RBAC for `controllerrevisions`
+is included in `10-rbac.yaml`.
+
+## Shell / Exec Access
+
+The **Exec** button on pod detail pages is RBAC-aware. It performs a `SelfSubjectAccessReview`
+for `pods/exec` before rendering — users without `create` permission on that subresource see
+a disabled button with a tooltip instead of a runtime error.
 
 ## Health Digest + Event Alert Notifications
 

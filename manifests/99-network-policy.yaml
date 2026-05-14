@@ -216,7 +216,7 @@ spec:
     # (also covers VictoriaMetrics push on port 8428 when VM_ENDPOINT is set)
     - {}
 
-# ── VictoriaMetrics — ingress from API + metrics-scraper, no egress needed ───
+# ── VictoriaMetrics — ingress from API + metrics-scraper; egress to k8s API + node-exporter ─
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -247,4 +247,14 @@ spec:
       ports:
         - port: 8428
           protocol: TCP
-  egress: []
+  egress:
+    # Kubernetes API server — required for kubernetes_sd pod discovery
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+    # Node-exporter scrape — hostNetwork pods are reached via node IPs on port 9100
+    - ports:
+        - port: 9100
+          protocol: TCP
