@@ -9,8 +9,8 @@ Production deployment manifests for the Kubernetes Dashboard — a maintained co
 ### Sign In
 ![Sign in screen](screenshots/k8s_dashboard_logon.png)
 
-### Overview
-Cluster resource donuts (CPU / Memory / Pods / Nodes) plus workload status bubbles and per-kind counts at a glance.
+### Cluster Health Overview
+PRTG-style landing page: six stat tiles (Nodes, Pods, Warnings, Policy Score, Certificates, CVEs), five donut charts (Pod Health, Resource Efficiency, Policy Audit, Certificates, Kubescape — detection-gated), and a live Network Traffic graph when node-exporter is deployed.
 
 ![Dashboard overview](screenshots/k8s_dashboard_home.png)
 
@@ -35,7 +35,7 @@ Polaris-native security scoring (0–100) per workload — danger and warning co
 ![Policy audit](screenshots/k8s_dashboard_policy_audit.png)
 
 ### Resource Efficiency
-Goldilocks-style request/limit/actual comparison for every container — No Limits, Hot, Cold, and OK verdicts with CSV export.
+Goldilocks-style request/limit/actual comparison for every container — No Limits, Hot, Cold, and OK verdicts with CSV export and trend arrows (↑↓→) when VictoriaMetrics is enabled.
 
 ![Resource efficiency](screenshots/k8s_dashboard_resource_efficiency.png)
 
@@ -70,7 +70,7 @@ Pod CPU and memory sparklines with 1h/6h/24h/7d time range selector — opt-in v
 ![VictoriaMetrics sparklines](screenshots/k8s_dashboard_victoriametrics.png)
 
 ### PVC Storage Usage
-Persistent Volume Claims with live usage bars sourced from the metrics server.
+Persistent Volume Claims with live usage bars sourced from the kubelet stats API.
 
 ![PVC storage usage](screenshots/k8s_dashboard_pvc.png)
 
@@ -89,6 +89,13 @@ Browser
         └── /                                 → dashboard-web (React SPA)
 ```
 
+Optional add-ons (all in the same namespace):
+
+| Add-on | Manifest | Enables |
+|---|---|---|
+| VictoriaMetrics | `25-victoriametrics.yaml` | Pod CPU/memory sparklines, trend arrows, network graph |
+| Node Exporter | `26-node-exporter.yaml` | Network Traffic graph on Overview page |
+
 ---
 
 ## Deploy
@@ -96,10 +103,10 @@ Browser
 Images are published to GitHub Container Registry and pulled automatically — no build step needed.
 
 ```bash
-# 1. Create the namespace first
+# 1. Namespace first
 kubectl apply -f manifests/00-namespace.yaml
 
-# 2. Generate the CSRF key (once — save it for future deploys)
+# 2. Generate CSRF key (once — save it)
 kubectl -n kubernetes-dashboard create secret generic kubernetes-dashboard-csrf \
   --from-literal=private.key="$(openssl rand 256 | base64 | tr -d '\n')"
 
@@ -112,13 +119,20 @@ kubectl apply -f manifests/60-admin-user.yaml
 kubectl apply -f manifests/99-network-policy.yaml
 ```
 
-Verify all five pods reach Running:
+**Optional — historical metrics + Network Traffic graph:**
+
+```bash
+kubectl apply -f manifests/26-node-exporter.yaml   # creates RBAC + scrape ConfigMap
+kubectl apply -f manifests/25-victoriametrics.yaml
+```
+
+Verify all pods reach Running:
 
 ```bash
 kubectl get all -n kubernetes-dashboard
 ```
 
-See [manifests/DEPLOY.md](manifests/DEPLOY.md) for the full runbook including optional features, AI assistant setup, and tear-down.
+See [manifests/DEPLOY.md](manifests/DEPLOY.md) for the full runbook including AI assistant setup, notifications, Kubescape integration, and tear-down.
 
 ---
 
@@ -153,12 +167,14 @@ kubectl get secret admin-user -n kubernetes-dashboard \
 | **Gateway API** | GatewayClasses, Gateways, HTTPRoutes — shown automatically when `gateway.networking.k8s.io` CRDs are detected |
 | **Kubescape** | Config scan scores, CVE findings, eBPF NetworkPolicy generator — shown automatically when Kubescape Operator is running |
 | **Pod Logs** | Live streaming, timestamps, previous container, severity filter (ALL / ERROR / WARN / INFO / DEBUG), text filter, line count, download |
-| **Pod Shell** | Interactive xterm.js terminal, shell selector, connect / disconnect |
+| **Pod Shell** | Interactive xterm.js terminal, shell selector, RBAC-aware exec button (disabled with tooltip when `pods/exec` permission is absent) |
 
 ### Native Extended Features
 
 | Feature | Route | Description |
 |---|---|---|
+| **Cluster Health Overview** | `/overview` | Landing page. Stat tiles (Nodes, Pods, Warnings, Policy Score, Certs, CVEs), donut charts (Pod Health, Efficiency, Policy, Certs, Kubescape), live Network Traffic graph (node-exporter required) |
+| **Registry Manager** | `/registries` | All `kubernetes.io/dockerconfigjson` secrets parsed and cross-referenced with pod `imagePullSecrets` — shows workload usage per registry, flags unused secrets |
 | **Cluster Map** | `/map` | All workloads grouped by namespace as colour-coded health cards — zoom 40–150% |
 | **Policy Audit** | `/audit` | 14 Polaris-style security checks per workload, scored 0–100, filterable by severity |
 | **Resource Efficiency** | `/efficiency` | Goldilocks-style: CPU/memory requests vs limits vs actual, verdict chips, CSV export, trend arrows (↑↓→) when VictoriaMetrics is enabled |
@@ -166,12 +182,12 @@ kubectl get secret admin-user -n kubernetes-dashboard \
 | **Certificate Tracker** | `/certs` | TLS secrets parsed with `crypto/x509` — expiry countdown, status badges, SAN display |
 | **Event Timeline** | `/timeline` | Live event feed (5 s refresh), time-bucketed, warning highlight, text filter |
 | **Application Projects** | `/projects` | Per-namespace project cards with pod health, workload counts, and CPU/memory request totals |
-| **Storage Usage** | PV/PVC pages | Real-time PVC usage via kubelet stats — used/available/capacity per volume, aggregate donut chart |
-| **AI Assistant** | AppBar | Claude Sonnet via SSE streaming — pod spec and recent events auto-injected when on a pod page |
+| **Storage Usage** | PV/PVC pages | Real-time PVC usage via kubelet stats — used/available/capacity per volume, aggregate donut on list pages |
+| **AI Assistant** | AppBar | Claude Sonnet via SSE streaming — pod spec and recent events auto-injected when opened from a pod detail page |
 | **Health Digest** | Background | Daily cluster health email (score, namespace table, top issues) via Microsoft Graph API |
-| **Event Alerts** | Background | Real-time email on CrashLoop / OOM / ImagePullBackOff / NodeNotReady / PVC issues; 1 h dedup |
-| **ISMS CORE Integration** | `GET /api/v1/summary` | Machine-readable cluster health snapshot — node status, pod phases, policy score, cert expiry counts |
-| **VictoriaMetrics** | Optional | Remote write from metrics-scraper; pod CPU/memory sparklines + trend arrows; opt-in via `VM_ENDPOINT` env var |
+| **Event Alerts** | Background | Real-time email on CrashLoop / OOM / ImagePullBackOff / NodeNotReady / PVC issues; 1 h dedup per workload; configurable per type |
+| **ISMS Core Integration** | `GET /api/v1/summary` | Machine-readable cluster health snapshot — node status, pod phases, policy score, cert expiry counts |
+| **VictoriaMetrics** | Optional | Remote write from metrics-scraper; pod CPU/memory sparklines + trend arrows; Network Traffic graph on Overview page when node-exporter is also deployed |
 
 ### Workload Actions
 
@@ -185,6 +201,7 @@ All workload detail pages include RBAC-aware action buttons (disabled with toolt
 | Scale | ✅ | — | ✅ |
 | Rollback with revision history | ✅ | ✅ | ✅ |
 | Pause / Resume | ✅ | — | — |
+| Exec / Shell | ✅ | ✅ | ✅ |
 
 ---
 
