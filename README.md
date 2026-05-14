@@ -9,10 +9,15 @@ Production deployment manifests for the Kubernetes Dashboard — a maintained co
 ### Sign In
 ![Sign in screen](screenshots/k8s_dashboard_logon.png)
 
-### Cluster Health Overview
-PRTG-style landing page: six stat tiles (Nodes, Pods, Warnings, Policy Score, Certificates, CVEs), five donut charts (Pod Health, Resource Efficiency, Policy Audit, Certificates, Kubescape — detection-gated), and a live Network Traffic graph when node-exporter is deployed.
+### Overview
+Stat tiles (Nodes, Pods, Warnings, Policy Score, Certificates, CVEs), donut charts (Pod Health, Resource Efficiency, Policy Audit, Certificates, Kubescape — detection-gated), and a live Network Traffic graph when node-exporter is deployed.
 
-![Dashboard overview](screenshots/k8s_dashboard_home.png)
+![Overview](screenshots/k8s_dashboard_overview.png)
+
+### Workloads
+Full workload list across Deployments, DaemonSets, StatefulSets, Jobs, and more — with status, restart count, and inline actions.
+
+![Workloads](screenshots/k8s_dashboard_home.png)
 
 ### Cluster Map
 Namespace-scoped topology view of every Deployment, DaemonSet, and StatefulSet — with Error/Warning filter and zoom controls.
