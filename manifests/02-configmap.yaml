@@ -47,6 +47,9 @@ data:
         host: kubernetes-dashboard-api
         port: 8000
         protocol: http
+        connect_timeout: 60000
+        read_timeout: 3600000
+        write_timeout: 3600000
         routes:
           - name: api
             paths:

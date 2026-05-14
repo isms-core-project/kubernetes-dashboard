@@ -188,6 +188,7 @@ kubectl get secret admin-user -n kubernetes-dashboard \
 | **Event Alerts** | Background | Real-time email on CrashLoop / OOM / ImagePullBackOff / NodeNotReady / PVC issues; 1 h dedup per workload; configurable per type |
 | **ISMS Core Integration** | `GET /api/v1/summary` | Machine-readable cluster health snapshot — node status, pod phases, policy score, cert expiry counts |
 | **VictoriaMetrics** | Optional | Remote write from metrics-scraper; pod CPU/memory sparklines + trend arrows; Network Traffic graph on Overview page when node-exporter is also deployed |
+| **Cluster Shell** | AppBar | Full interactive bash terminal (xterm.js) exec'd into the dashboard API pod — kubectl runs as the logged-in user's JWT so permissions reflect their RBAC |
 
 ### Workload Actions
 
