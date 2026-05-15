@@ -105,6 +105,7 @@ Optional add-ons (all in the same namespace):
 |---|---|---|
 | Node Exporter | `25-node-exporter.yaml` | Network Traffic graph on Overview page (deploy first) |
 | VictoriaMetrics | `26-victoriametrics.yaml` | Pod CPU/memory sparklines, trend arrows, network graph |
+| Prometheus | External (`kube-prometheus-stack`) | Same sparklines and trends as VictoriaMetrics — set `PROMETHEUS_ENDPOINT` in `20-deployments-hardened.yaml` instead of `VM_ENDPOINT` |
 
 ---
 
@@ -135,6 +136,8 @@ kubectl apply -f manifests/99-network-policy.yaml
 kubectl apply -f manifests/25-node-exporter.yaml   # creates RBAC + scrape ConfigMap
 kubectl apply -f manifests/26-victoriametrics.yaml
 ```
+
+Or, if you already run **kube-prometheus-stack**, skip the VictoriaMetrics manifest and uncomment `PROMETHEUS_ENDPOINT` in `20-deployments-hardened.yaml` instead — both backends produce the same sparklines and trend arrows.
 
 Verify all pods reach Running:
 
@@ -197,7 +200,7 @@ kubectl get secret admin-user -n kubernetes-dashboard \
 | **Health Digest** | Background | Daily cluster health email (score, namespace table, top issues) via Microsoft Graph API |
 | **Event Alerts** | Background | Real-time email on CrashLoop / OOM / ImagePullBackOff / NodeNotReady / PVC issues; 1 h dedup per workload; configurable per type |
 | **ISMS Core Integration** | `GET /api/v1/summary` | Machine-readable cluster health snapshot — node status, pod phases, policy score, cert expiry counts |
-| **VictoriaMetrics** | Optional | Remote write from metrics-scraper; pod CPU/memory sparklines + trend arrows; Network Traffic graph on Overview page when node-exporter is also deployed |
+| **VictoriaMetrics / Prometheus** | Optional | Pod CPU/memory sparklines + trend arrows on Resource Efficiency; Network Traffic graph on Overview (node-exporter also required). Set `VM_ENDPOINT` for VictoriaMetrics or `PROMETHEUS_ENDPOINT` for kube-prometheus-stack — both coexist |
 | **Cluster Shell** | AppBar | Full interactive bash terminal (xterm.js) exec'd into the dashboard API pod — kubectl runs as the logged-in user's JWT so permissions reflect their RBAC |
 
 ### Workload Actions
