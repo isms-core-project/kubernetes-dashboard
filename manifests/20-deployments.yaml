@@ -185,6 +185,14 @@ spec:
                   name: kubernetes-dashboard-notifications
                   key: NOTIFY_INTERVAL_H
                   optional: true
+            # ── Metrics backend (optional) ────────────────────────────────────────────
+            # Uncomment ONE (or both) to enable pod sparklines and the Network Traffic graph.
+            # VictoriaMetrics — deploy 26-victoriametrics.yaml then uncomment:
+            # - name: VM_ENDPOINT
+            #   value: "http://kubernetes-dashboard-victoriametrics:8428"
+            # Prometheus (kube-prometheus-stack) — uncomment and set your Prometheus URL:
+            # - name: PROMETHEUS_ENDPOINT
+            #   value: "http://prometheus-k8s.monitoring.svc:9090"
             - name: GOMAXPROCS
               valueFrom:
                 resourceFieldRef:
@@ -329,6 +337,12 @@ spec:
             - containerPort: 8000
               protocol: TCP
           env:
+            # ── Metrics backend (optional) ────────────────────────────────────────────
+            # Must match the value(s) set on the api container above.
+            # - name: VM_ENDPOINT
+            #   value: "http://kubernetes-dashboard-victoriametrics:8428"
+            # - name: PROMETHEUS_ENDPOINT
+            #   value: "http://prometheus-k8s.monitoring.svc:9090"
             - name: GOMAXPROCS
               valueFrom:
                 resourceFieldRef:

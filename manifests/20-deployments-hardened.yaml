@@ -179,6 +179,12 @@ spec:
             # to keep the default SQLite-only behaviour with no UI change.
             - name: VM_ENDPOINT
               value: "http://kubernetes-dashboard-victoriametrics:8428"
+            # ── Prometheus (optional — coexists with VM_ENDPOINT) ─────────────────────
+            # If you run kube-prometheus-stack instead of (or alongside) VictoriaMetrics,
+            # uncomment and set to your Prometheus service URL. VM takes priority if both
+            # are configured. Typical kube-prometheus value:
+            # - name: PROMETHEUS_ENDPOINT
+            #   value: "http://prometheus-k8s.monitoring.svc:9090"
             # ── Proxy (optional) ─────────────────────────────────────────────────────
             # Required if your cluster has no direct outbound internet access.
             # The AI assistant calls api.anthropic.com:443 — route it through your proxy.
@@ -443,6 +449,10 @@ spec:
             # Must match the value set on the api container above.
             - name: VM_ENDPOINT
               value: "http://kubernetes-dashboard-victoriametrics:8428"
+            # ── Prometheus (optional — coexists with VM_ENDPOINT) ─────────────────────
+            # Uncomment if using kube-prometheus-stack instead of / alongside VictoriaMetrics.
+            # - name: PROMETHEUS_ENDPOINT
+            #   value: "http://prometheus-k8s.monitoring.svc:9090"
           livenessProbe:
             httpGet:
               scheme: HTTP
