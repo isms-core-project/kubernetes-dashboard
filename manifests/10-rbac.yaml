@@ -202,13 +202,17 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments", "daemonsets", "statefulsets"]
     verbs: ["list"]
-  # Event watcher watches Warning events cluster-wide for alert notifications
+  # Health digest: pod snapshot and warning events cluster-wide
   - apiGroups: [""]
-    resources: ["events"]
+    resources: ["pods", "events"]
     verbs: ["get", "list", "watch"]
-  # Storage usage: query kubelet stats/summary per node via the API proxy
+  # Storage usage + node snapshot for health digest
   - apiGroups: [""]
     resources: ["nodes", "nodes/stats"]
+    verbs: ["get", "list"]
+  # Cert tracker reads TLS secrets for health digest cert alerts
+  - apiGroups: [""]
+    resources: ["secrets"]
     verbs: ["get", "list"]
   # Kubescape: apply GeneratedNetworkPolicy as a real NetworkPolicy
   - apiGroups: ["networking.k8s.io"]

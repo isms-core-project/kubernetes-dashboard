@@ -94,7 +94,7 @@ kubectl apply -f 26-victoriametrics.yaml
 kubectl rollout status statefulset/kubernetes-dashboard-victoriametrics -n kubernetes-dashboard
 ```
 
-This creates a StatefulSet with a **2Gi PVC with the StorageClass of your choice (e.g. longhorn, standard, gp2)** and a ClusterIP Service. Data is retained
+This creates a StatefulSet with a **2Gi Longhorn PVC** and a ClusterIP Service. Data is retained
 for 30 days by default (configurable via `-retentionPeriod` in the StatefulSet args).
 
 ### Enable the feature
