@@ -90,10 +90,10 @@ data:
           - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
             regex: kubernetes-dashboard-node-exporter
             action: keep
-          # Use pod IP + port 9100 (hostNetwork means pod IP = node IP)
+          # Use pod IP + port 9101 (hostNetwork; avoids conflict with kube-prometheus node-exporter on 9100)
           - source_labels: [__meta_kubernetes_pod_ip]
             target_label: __address__
-            replacement: $1:9100
+            replacement: $1:9101
           # Add node name label
           - source_labels: [__meta_kubernetes_pod_node_name]
             target_label: node
@@ -183,12 +183,12 @@ spec:
             - --collector.uname
             # Filesystem: skip virtual/container mounts
             - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run/k3s|var/lib/kubelet|var/lib/containerd|run/containerd)($|/)
-            - --web.listen-address=:9100
+            - --web.listen-address=:9101
             - --web.telemetry-path=/metrics
           ports:
             - name: metrics
-              containerPort: 9100
-              hostPort:      9100
+              containerPort: 9101
+              hostPort:      9101
               protocol:      TCP
           resources:
             requests:
@@ -211,13 +211,13 @@ spec:
           livenessProbe:
             httpGet:
               path: /
-              port: 9100
+              port: 9101
             initialDelaySeconds: 5
             periodSeconds:       30
           readinessProbe:
             httpGet:
               path: /
-              port: 9100
+              port: 9101
             initialDelaySeconds: 3
             periodSeconds:       15
       volumes:
@@ -243,6 +243,6 @@ spec:
     app.kubernetes.io/name: kubernetes-dashboard-node-exporter
   ports:
     - name: metrics
-      port: 9100
-      targetPort: 9100
+      port: 9101
+      targetPort: 9101
       protocol: TCP

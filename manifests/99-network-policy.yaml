@@ -262,7 +262,7 @@ spec:
           protocol: TCP
         - port: 6443
           protocol: TCP
-    # Node-exporter scrape — hostNetwork pods are reached via node IPs on port 9100
+    # Node-exporter scrape — hostNetwork pods on port 9101 (9100 reserved for kube-prometheus)
     - ports:
-        - port: 9100
+        - port: 9101
           protocol: TCP
