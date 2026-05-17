@@ -195,6 +195,8 @@ kubectl get secret admin-user -n kubernetes-dashboard \
 | **Custom Resource Definitions** | CRD list, detail, and per-CRD object browser |
 | **Gateway API** | GatewayClasses, Gateways, HTTPRoutes — shown automatically when `gateway.networking.k8s.io` CRDs are detected |
 | **Kubescape** | Config scan scores, CVE findings, eBPF NetworkPolicy generator — shown automatically when Kubescape Operator is running |
+| **Cert Manager** | Certificates, Issuers, and ClusterIssuers with ready status, expiry countdown, and issuer reference — shown automatically when `cert-manager.io` CRDs are detected |
+| **MetalLB** | IP Address Pools (address ranges, IPv4 utilisation bar) and L2 Advertisements (pools + interfaces) — shown automatically when `metallb.io` CRDs are detected |
 | **Pod Logs** | Live streaming, timestamps, previous container, severity filter (ALL / ERROR / WARN / INFO / DEBUG), text filter, line count, download |
 | **Pod Shell** | Interactive xterm.js terminal, shell selector, RBAC-aware exec button (disabled with tooltip when `pods/exec` permission is absent) |
 
