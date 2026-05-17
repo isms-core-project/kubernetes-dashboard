@@ -26,7 +26,9 @@ kubectl apply -f 03-ai-secret.yaml       # Optional — AI assistant (see below)
 kubectl apply -f 10-rbac.yaml
 kubectl apply -f 20-deployments.yaml
 kubectl apply -f 50-services.yaml
-kubectl apply -f 60-admin-user.yaml
+
+# Choose one login account — see "Login Accounts" under Access below
+kubectl apply -f 60-admin-user.yaml      # cluster-admin — homelab/local dev only
 ```
 
 ## Deploy (Hardened)
@@ -42,8 +44,10 @@ kubectl apply -f 04-notifications-secret.yaml # Optional — email notifications
 kubectl apply -f 10-rbac.yaml
 kubectl apply -f 20-deployments-hardened.yaml
 kubectl apply -f 50-services.yaml
-kubectl apply -f 60-admin-user.yaml
 kubectl apply -f 99-network-policy.yaml
+
+# Choose one login account — see "Login Accounts" under Access below
+kubectl apply -f 60-admin-user.yaml           # cluster-admin — homelab/local dev only
 ```
 
 Hardened variant adds: `readOnlyRootFilesystem`, `runAsNonRoot`, `drop ALL` capabilities,
@@ -202,7 +206,26 @@ and (when VictoriaMetrics + node-exporter are deployed) a live network traffic g
 | Audit | `/audit` | Polaris-style policy compliance report |
 | Settings | `/settings` | Global config, notifications, event alert preferences |
 
+## Login Accounts
+
+Three manifests are provided — apply the one that fits your use case:
+
+| Manifest | Account | Permissions | Use case |
+|---|---|---|---|
+| `60-admin-user.yaml` | `admin-user` | `cluster-admin` (full cluster) | Homelab, local dev, initial setup |
+| `61-readonly-user.yaml` | `readonly-user` | Built-in `view` (read-only cluster-wide, no Secrets) | Monitoring users, on-call, auditors |
+| `62-namespace-user.yaml` | `namespace-user` | Built-in `admin` scoped to one namespace | Team leads, app owners |
+
+> **Production note:** `60-admin-user.yaml` grants unrestricted cluster-admin access.
+> For shared or production clusters use `61-readonly-user.yaml` or `62-namespace-user.yaml` instead,
+> or create scoped tokens aligned to your own RBAC policy.
+
+Before applying `62-namespace-user.yaml`, edit the file and replace `namespace: default` in the
+RoleBinding with your target namespace.
+
 ## Get Login Token
+
+Replace `admin-user` with the account name you applied (`readonly-user` or `namespace-user`):
 
 ```bash
 kubectl get secret admin-user -n kubernetes-dashboard \
@@ -354,9 +377,11 @@ The Security section disappears from the dashboard automatically.
 
 ```bash
 kubectl delete namespace kubernetes-dashboard
-kubectl delete clusterrole kubernetes-dashboard-metrics-scraper
-kubectl delete clusterrolebinding kubernetes-dashboard-metrics-scraper
-kubectl delete clusterrolebinding admin-user
+
+# Cluster-scoped resources — not removed by namespace delete
+kubectl delete clusterrole kubernetes-dashboard-metrics-scraper kubernetes-dashboard-auth kubernetes-dashboard-api
+kubectl delete clusterrolebinding kubernetes-dashboard-metrics-scraper kubernetes-dashboard-auth kubernetes-dashboard-api
+kubectl delete clusterrolebinding admin-user readonly-user   # whichever accounts you applied
 ```
 
-Note: ClusterRole and ClusterRoleBindings are cluster-scoped — deleting the namespace does not remove them.
+Note: ClusterRoles and ClusterRoleBindings are cluster-scoped — deleting the namespace does not remove them.
