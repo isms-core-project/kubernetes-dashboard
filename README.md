@@ -126,8 +126,10 @@ kubectl apply -f manifests/02-configmap.yaml
 kubectl apply -f manifests/10-rbac.yaml
 kubectl apply -f manifests/20-deployments-hardened.yaml
 kubectl apply -f manifests/50-services.yaml
-kubectl apply -f manifests/60-admin-user.yaml
 kubectl apply -f manifests/99-network-policy.yaml
+
+# 4. Create a login account — choose one (see Access section below)
+kubectl apply -f manifests/60-admin-user.yaml   # cluster-admin — lab/homelab only
 ```
 
 **Optional — historical metrics + Network Traffic graph:**
@@ -157,7 +159,21 @@ The dashboard is served via a Kong LoadBalancer service. Get the assigned IP:
 kubectl get svc kubernetes-dashboard-kong -n kubernetes-dashboard
 ```
 
-### Login Token
+### Login Accounts
+
+Three manifest options are provided. Pick the one that fits your use case — you can apply more than one.
+
+| Manifest | Account | Permissions | Use case |
+|---|---|---|---|
+| `60-admin-user.yaml` | `admin-user` | `cluster-admin` (full cluster) | Homelab, local dev, initial setup |
+| `61-readonly-user.yaml` | `readonly-user` | Built-in `view` (read-only cluster-wide, no Secrets) | Monitoring users, on-call engineers, auditors |
+| `62-namespace-user.yaml` | `namespace-user` | Built-in `admin` scoped to one namespace | Team leads, developers who own a namespace |
+
+> **Production note:** `60-admin-user.yaml` grants unrestricted cluster-admin access.
+> For shared or production clusters use `61-readonly-user.yaml` or `62-namespace-user.yaml` instead,
+> or create scoped tokens for each person using your own RBAC policy.
+
+**Get the login token** (replace `admin-user` with the account name you applied):
 
 ```bash
 kubectl get secret admin-user -n kubernetes-dashboard \

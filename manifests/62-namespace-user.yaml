@@ -1,0 +1,48 @@
+# ==============================================================================================================
+# 62-namespace-user.yaml — Namespace-scoped admin service account for dashboard login
+#
+# Grants full admin access within ONE namespace only (default: "default").
+# Cannot see or modify any other namespace or cluster-level resources.
+#
+# BEFORE APPLYING: Replace every occurrence of "default" below with your target namespace.
+#
+# Suitable for: team leads, app owners, developers who own a specific namespace
+#
+# Get the login token after applying:
+#   kubectl get secret namespace-user -n kubernetes-dashboard \
+#     -o jsonpath='{.data.token}' | base64 -d
+# ==============================================================================================================
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: namespace-user
+  namespace: kubernetes-dashboard
+
+---
+# RoleBinding (not ClusterRoleBinding) — scopes admin rights to the target namespace only.
+# Change namespace: to the namespace this user should administer.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: namespace-user-admin
+  namespace: default            # <── change this to your target namespace
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin                   # built-in: full CRUD within the namespace
+subjects:
+  - kind: ServiceAccount
+    name: namespace-user
+    namespace: kubernetes-dashboard
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: namespace-user
+  namespace: kubernetes-dashboard
+  annotations:
+    kubernetes.io/service-account.name: namespace-user
+type: kubernetes.io/service-account-token
