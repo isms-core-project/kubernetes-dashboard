@@ -26,9 +26,7 @@ kubectl apply -f 03-ai-secret.yaml       # Optional — AI assistant (see below)
 kubectl apply -f 10-rbac.yaml
 kubectl apply -f 20-deployments.yaml
 kubectl apply -f 50-services.yaml
-
-# Choose one login account — see "Login Accounts" under Access below
-kubectl apply -f 60-admin-user.yaml      # cluster-admin — homelab/local dev only
+kubectl apply -f 60-admin-user.yaml
 ```
 
 ## Deploy (Hardened)
@@ -44,10 +42,8 @@ kubectl apply -f 04-notifications-secret.yaml # Optional — email notifications
 kubectl apply -f 10-rbac.yaml
 kubectl apply -f 20-deployments-hardened.yaml
 kubectl apply -f 50-services.yaml
+kubectl apply -f 60-admin-user.yaml
 kubectl apply -f 99-network-policy.yaml
-
-# Choose one login account — see "Login Accounts" under Access below
-kubectl apply -f 60-admin-user.yaml           # cluster-admin — homelab/local dev only
 ```
 
 Hardened variant adds: `readOnlyRootFilesystem`, `runAsNonRoot`, `drop ALL` capabilities,
@@ -65,7 +61,8 @@ probes on all containers. Kong cannot have `readOnlyRootFilesystem` (writes lua 
 | auth | kong only | k8s API server (443/6443) + DNS |
 | api | kong only | metrics-scraper + victoriametrics (8428) + k8s API server (443/6443) + DNS |
 | metrics-scraper | api only | everywhere (must scrape all namespaces; covers VM push) |
-| victoriametrics | api + metrics-scraper (8428) | none |
+| victoriametrics | api + metrics-scraper + alloy (8428) | none |
+| alloy | none | victoriametrics (8428) |
 
 To apply or remove independently:
 ```bash
@@ -83,20 +80,12 @@ works exactly as before — no UI difference.
 
 ### Deploy VictoriaMetrics
 
-If you also want the Network Traffic graph, deploy node-exporter first (it creates the ServiceAccount VM needs):
-
-```bash
-kubectl apply -f 25-node-exporter.yaml   # creates vm-sd ServiceAccount + scrape ConfigMap
-kubectl apply -f 26-victoriametrics.yaml
-kubectl rollout status statefulset/kubernetes-dashboard-victoriametrics -n kubernetes-dashboard
-```
-
-Node-exporter only is also fine — VM without node-exporter still works for pod CPU/memory sparklines:
-
 ```bash
 kubectl apply -f 26-victoriametrics.yaml
 kubectl rollout status statefulset/kubernetes-dashboard-victoriametrics -n kubernetes-dashboard
 ```
+
+For the Network Traffic graph, also deploy Alloy (see below). Both can be applied in either order — Alloy retries `remote_write` until VictoriaMetrics is ready.
 
 This creates a StatefulSet with a **2Gi Longhorn PVC** and a ClusterIP Service. Data is retained
 for 30 days by default (configurable via `-retentionPeriod` in the StatefulSet args).
@@ -143,33 +132,52 @@ kubectl delete -f 26-victoriametrics.yaml
 kubectl delete pvc storage-kubernetes-dashboard-victoriametrics-0 -n kubernetes-dashboard
 ```
 
-## Node Exporter (Optional — Network Traffic Graph)
+## Grafana Alloy (Optional — Network Traffic Graph)
 
-Deploys Prometheus `node_exporter` as a DaemonSet so VictoriaMetrics can scrape
-per-node network metrics. Required for the **Network Traffic** graph on the Overview page.
+Deploys Grafana Alloy as a DaemonSet to collect per-node metrics and push them directly to
+VictoriaMetrics via `remote_write`. Required for the **Network Traffic** graph on the Overview page.
 
-Deploy **before** VictoriaMetrics — `25-node-exporter.yaml` creates the `kubernetes-dashboard-vm-sd`
-ServiceAccount that `26-victoriametrics.yaml` depends on.
+No dependency on VictoriaMetrics deploy order — Alloy retries `remote_write` until VM is ready.
 
 ```bash
-kubectl apply -f 25-node-exporter.yaml
-kubectl rollout status daemonset/kubernetes-dashboard-node-exporter -n kubernetes-dashboard
+kubectl apply -f 25-alloy.yaml
+kubectl rollout status daemonset/kubernetes-dashboard-alloy -n kubernetes-dashboard
 ```
 
 The manifest includes:
-- `kubernetes-dashboard-vm-sd` ServiceAccount + ClusterRole for VM kubernetes_sd pod discovery
-- VM scrape ConfigMap (`kubernetes-dashboard-vm-scrape`) with `kubernetes_sd`, label relabelling, and virtual interface exclusion
-- Selective collector list (cpu, meminfo, diskstats, filesystem, netdev, uname, loadavg)
-- Talos-compatible: `--path.rootfs=/host` with host root mounted read-only
-- `hostNetwork: true`, `hostPID: true`, non-root, `readOnlyRootFilesystem`
-- Tolerations for control-plane nodes
+- `kubernetes-dashboard-alloy` ServiceAccount (no ClusterRole — Alloy does not query the k8s API)
+- Alloy ConfigMap with River config: `prometheus.exporter.unix` → `prometheus.remote_write` to VictoriaMetrics
+- Same selective collectors as node-exporter: cpu, meminfo, diskstats, filesystem, netdev, uname, loadavg
+- Talos-compatible: `rootfs_path=/host`, `procfs_path=/host/proc`, `sysfs_path=/host/sys` with host root mounted read-only
+- Push model — no hostPort, no port conflicts with kube-prometheus or any other monitoring stack
+- Node name injected via `NODE_NAME` env var (from `spec.nodeName`); added as `node` and `instance` labels
+- Virtual interface filter: lo, veth, cni, flannel, docker, br-, tunl, kube, dummy excluded
+- Tolerations for control-plane nodes; non-root, `readOnlyRootFilesystem`, WAL on emptyDir
 
-`26-victoriametrics.yaml` already references the `kubernetes-dashboard-vm-scrape` ConfigMap
-and the `kubernetes-dashboard-vm-sd` ServiceAccount — no manual patching required.
-
-After ~60 seconds of first scrape, the Overview page Zone 3 (Network Traffic) auto-detects
+After ~60 seconds of first push, the Overview page Zone 3 (Network Traffic) auto-detects
 physical NICs via VictoriaMetrics label values and shows live rx/tx bytes/s with a 1h/6h/24h/7d
-range toggle. Virtual interfaces (lo, veth, cni, flannel, etc.) are filtered out automatically.
+range toggle. Virtual interfaces are filtered out automatically.
+
+### Upgrading from node-exporter
+
+If you previously deployed `25-node-exporter.yaml`, clean up the old cluster-scoped resources:
+
+```bash
+kubectl delete daemonset kubernetes-dashboard-node-exporter -n kubernetes-dashboard
+kubectl delete service kubernetes-dashboard-node-exporter -n kubernetes-dashboard
+kubectl delete configmap kubernetes-dashboard-vm-scrape -n kubernetes-dashboard
+kubectl delete clusterrole kubernetes-dashboard-vm-sd
+kubectl delete clusterrolebinding kubernetes-dashboard-vm-sd
+kubectl delete serviceaccount kubernetes-dashboard-vm-sd -n kubernetes-dashboard
+```
+
+Then apply the new manifest and restart VictoriaMetrics to clear the old scrape config:
+
+```bash
+kubectl apply -f 25-alloy.yaml
+kubectl apply -f 26-victoriametrics.yaml   # picks up the updated StatefulSet spec
+kubectl rollout restart statefulset/kubernetes-dashboard-victoriametrics -n kubernetes-dashboard
+```
 
 ---
 
@@ -180,13 +188,13 @@ kubectl get all -n kubernetes-dashboard
 ```
 
 All 5 pods (auth, api, web, metrics-scraper, kong) should reach Running.
-With node-exporter: 5 dashboard pods + one node-exporter pod per node.
+With Alloy: 5 dashboard pods + one alloy pod per node.
 
 ## Access
 
 Dashboard is at `http://<YOUR-IP>` — MetalLB assigns the IP to the Kong proxy LoadBalancer.
 The landing page is `/overview` — a PRTG-style cluster health summary with stat tiles, donut charts,
-and (when VictoriaMetrics + node-exporter are deployed) a live network traffic graph.
+and (when VictoriaMetrics + Alloy are deployed) a live network traffic graph.
 
 ### Pages
 
@@ -206,26 +214,7 @@ and (when VictoriaMetrics + node-exporter are deployed) a live network traffic g
 | Audit | `/audit` | Polaris-style policy compliance report |
 | Settings | `/settings` | Global config, notifications, event alert preferences |
 
-## Login Accounts
-
-Three manifests are provided — apply the one that fits your use case:
-
-| Manifest | Account | Permissions | Use case |
-|---|---|---|---|
-| `60-admin-user.yaml` | `admin-user` | `cluster-admin` (full cluster) | Homelab, local dev, initial setup |
-| `61-readonly-user.yaml` | `readonly-user` | Built-in `view` (read-only cluster-wide, no Secrets) | Monitoring users, on-call, auditors |
-| `62-namespace-user.yaml` | `namespace-user` | Built-in `admin` scoped to one namespace | Team leads, app owners |
-
-> **Production note:** `60-admin-user.yaml` grants unrestricted cluster-admin access.
-> For shared or production clusters use `61-readonly-user.yaml` or `62-namespace-user.yaml` instead,
-> or create scoped tokens aligned to your own RBAC policy.
-
-Before applying `62-namespace-user.yaml`, edit the file and replace `namespace: default` in the
-RoleBinding with your target namespace.
-
 ## Get Login Token
-
-Replace `admin-user` with the account name you applied (`readonly-user` or `namespace-user`):
 
 ```bash
 kubectl get secret admin-user -n kubernetes-dashboard \
@@ -377,11 +366,9 @@ The Security section disappears from the dashboard automatically.
 
 ```bash
 kubectl delete namespace kubernetes-dashboard
-
-# Cluster-scoped resources — not removed by namespace delete
-kubectl delete clusterrole kubernetes-dashboard-metrics-scraper kubernetes-dashboard-auth kubernetes-dashboard-api
-kubectl delete clusterrolebinding kubernetes-dashboard-metrics-scraper kubernetes-dashboard-auth kubernetes-dashboard-api
-kubectl delete clusterrolebinding admin-user readonly-user   # whichever accounts you applied
+kubectl delete clusterrole kubernetes-dashboard-metrics-scraper
+kubectl delete clusterrolebinding kubernetes-dashboard-metrics-scraper
+kubectl delete clusterrolebinding admin-user
 ```
 
-Note: ClusterRoles and ClusterRoleBindings are cluster-scoped — deleting the namespace does not remove them.
+Note: ClusterRole and ClusterRoleBindings are cluster-scoped — deleting the namespace does not remove them.

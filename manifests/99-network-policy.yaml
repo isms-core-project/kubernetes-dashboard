@@ -224,7 +224,8 @@ spec:
     # (also covers VictoriaMetrics push on port 8428 when VM_ENDPOINT is set)
     - {}
 
-# ── VictoriaMetrics — ingress from API + metrics-scraper; egress to k8s API + node-exporter ─
+# ── VictoriaMetrics — ingress from API + metrics-scraper + Alloy; no egress needed ──────────
+# VM is a passive receiver of remote_write — it does not scrape or call the k8s API.
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -237,7 +238,6 @@ spec:
       app.kubernetes.io/name: kubernetes-dashboard-victoriametrics
   policyTypes:
     - Ingress
-    - Egress
   ingress:
     # API pod reads historical metrics via PromQL
     - from:
@@ -247,7 +247,7 @@ spec:
       ports:
         - port: 8428
           protocol: TCP
-    # Metrics-scraper pushes data via remote_write
+    # Metrics-scraper pushes pod CPU/memory data via remote_write
     - from:
         - podSelector:
             matchLabels:
@@ -255,14 +255,33 @@ spec:
       ports:
         - port: 8428
           protocol: TCP
+    # Alloy DaemonSet pushes node metrics (cpu, memory, network, disk) via remote_write
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kubernetes-dashboard-alloy
+      ports:
+        - port: 8428
+          protocol: TCP
+
+# ── Alloy — no ingress; egress to VictoriaMetrics only ───────────────────────
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kubernetes-dashboard-alloy
+  namespace: kubernetes-dashboard
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kubernetes-dashboard-alloy
+  policyTypes:
+    - Egress
   egress:
-    # Kubernetes API server — required for kubernetes_sd pod discovery
-    - ports:
-        - port: 443
-          protocol: TCP
-        - port: 6443
-          protocol: TCP
-    # Node-exporter scrape — hostNetwork pods on port 9101 (9100 reserved for kube-prometheus)
-    - ports:
-        - port: 9101
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kubernetes-dashboard-victoriametrics
+      ports:
+        - port: 8428
           protocol: TCP
