@@ -10,7 +10,7 @@ Production deployment manifests for the Kubernetes Dashboard — a maintained co
 ![Sign in screen](screenshots/k8s_dashboard_logon.png)
 
 ### Overview
-Stat tiles (Nodes, Pods, Warnings, Policy Score, Certificates, CVEs), donut charts (Pod Health, Resource Efficiency, Policy Audit, Certificates, Kubescape — detection-gated), and a live Network Traffic graph when node-exporter is deployed.
+Stat tiles (Nodes, Pods, Warnings, Policy Score, Certificates, CVEs), donut charts (Pod Health, Resource Efficiency, Policy Audit, Certificates, Kubescape — detection-gated), and a live Network Traffic graph when Grafana Alloy is deployed.
 
 ![Overview](screenshots/k8s_dashboard_overview.png)
 
@@ -103,7 +103,7 @@ Optional add-ons (all in the same namespace):
 
 | Add-on | Manifest | Enables |
 |---|---|---|
-| Node Exporter | `25-node-exporter.yaml` | Network Traffic graph on Overview page (deploy first) |
+| Grafana Alloy | `25-alloy.yaml` | Network Traffic graph on Overview page — push model, no port conflicts |
 | VictoriaMetrics | `26-victoriametrics.yaml` | Pod CPU/memory sparklines, trend arrows, network graph |
 | Prometheus | External (`kube-prometheus-stack`) | Same sparklines and trends as VictoriaMetrics — set `PROMETHEUS_ENDPOINT` in `20-deployments-hardened.yaml` instead of `VM_ENDPOINT` |
 
@@ -135,7 +135,7 @@ kubectl apply -f manifests/60-admin-user.yaml   # cluster-admin — lab/homelab 
 **Optional — historical metrics + Network Traffic graph:**
 
 ```bash
-kubectl apply -f manifests/25-node-exporter.yaml   # creates RBAC + scrape ConfigMap
+kubectl apply -f manifests/25-alloy.yaml
 kubectl apply -f manifests/26-victoriametrics.yaml
 ```
 
@@ -202,7 +202,7 @@ kubectl get secret admin-user -n kubernetes-dashboard \
 
 | Feature | Route | Description |
 |---|---|---|
-| **Cluster Health Overview** | `/overview` | Landing page. Stat tiles (Nodes, Pods, Warnings, Policy Score, Certs, CVEs), donut charts (Pod Health, Efficiency, Policy, Certs, Kubescape), live Network Traffic graph (node-exporter required) |
+| **Cluster Health Overview** | `/overview` | Landing page. Stat tiles (Nodes, Pods, Warnings, Policy Score, Certs, CVEs), donut charts (Pod Health, Efficiency, Policy, Certs, Kubescape), live Network Traffic graph (Grafana Alloy required) |
 | **Registry Manager** | `/registries` | All `kubernetes.io/dockerconfigjson` secrets parsed and cross-referenced with pod `imagePullSecrets` — shows workload usage per registry, flags unused secrets |
 | **Cluster Map** | `/map` | All workloads grouped by namespace as colour-coded health cards — zoom 40–150% |
 | **Policy Audit** | `/audit` | 14 Polaris-style security checks per workload, scored 0–100, filterable by severity |
@@ -216,7 +216,7 @@ kubectl get secret admin-user -n kubernetes-dashboard \
 | **Health Digest** | Background | Daily cluster health email (score, namespace table, top issues) via Microsoft Graph API |
 | **Event Alerts** | Background | Real-time email on CrashLoop / OOM / ImagePullBackOff / NodeNotReady / PVC issues; 1 h dedup per workload; configurable per type |
 | **ISMS Core Integration** | `GET /api/v1/summary` | Machine-readable cluster health snapshot — node status, pod phases, policy score, cert expiry counts |
-| **VictoriaMetrics / Prometheus** | Optional | Pod CPU/memory sparklines + trend arrows on Resource Efficiency; Network Traffic graph on Overview (node-exporter also required). Set `VM_ENDPOINT` for VictoriaMetrics or `PROMETHEUS_ENDPOINT` for kube-prometheus-stack — both coexist |
+| **VictoriaMetrics / Prometheus** | Optional | Pod CPU/memory sparklines + trend arrows on Resource Efficiency; Network Traffic graph on Overview (Grafana Alloy also required). Set `VM_ENDPOINT` for VictoriaMetrics or `PROMETHEUS_ENDPOINT` for kube-prometheus-stack — both coexist |
 | **Cluster Shell** | AppBar | Full interactive bash terminal (xterm.js) exec'd into the dashboard API pod — kubectl runs as the logged-in user's JWT so permissions reflect their RBAC |
 
 ### Workload Actions
