@@ -178,6 +178,14 @@ spec:
       ports:
         - port: 8428
           protocol: TCP
+    # Prometheus in monitoring namespace (optional — only active when PROMETHEUS_ENDPOINT is set)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 9090
+          protocol: TCP
     # Kubernetes API server (443 via ClusterIP, 6443 direct to control plane),
     # Anthropic API (api.anthropic.com:443), and Microsoft Graph API
     # (login.microsoftonline.com:443 + graph.microsoft.com:443) for notifications
