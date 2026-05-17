@@ -218,6 +218,14 @@ rules:
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
     verbs: ["get", "create", "patch"]
+  # Cert Manager: read certificates, issuers, and cluster issuers (detection-gated)
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates", "issuers", "clusterissuers"]
+    verbs: ["get", "list"]
+  # MetalLB: read IP address pools and L2 advertisements (detection-gated)
+  - apiGroups: ["metallb.io"]
+    resources: ["ipaddresspools", "l2advertisements"]
+    verbs: ["get", "list"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
