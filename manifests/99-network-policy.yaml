@@ -255,11 +255,12 @@ spec:
       ports:
         - port: 8428
           protocol: TCP
-    # Alloy DaemonSet pushes node metrics (cpu, memory, network, disk) via remote_write
+    # Alloy DaemonSet pushes node metrics (cpu, memory, network, disk) via remote_write.
+    # Alloy runs with hostNetwork: true so traffic originates from node IPs, not pod IPs —
+    # podSelector won't match; ipBlock covers the node network instead.
     - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: kubernetes-dashboard-alloy
+        - ipBlock:
+            cidr: 10.0.0.0/24
       ports:
         - port: 8428
           protocol: TCP

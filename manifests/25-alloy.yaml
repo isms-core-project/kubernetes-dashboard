@@ -131,6 +131,11 @@ spec:
         app.kubernetes.io/name: kubernetes-dashboard-alloy
         app.kubernetes.io/part-of: kubernetes-dashboard
     spec:
+      # hostNetwork: required so prometheus.exporter.unix netdev collector reads the
+      # host's /proc/net/dev (host network namespace), not the container's eth0.
+      # Push model means no hostPort is needed — Alloy pushes out, doesn't listen.
+      hostNetwork: true
+      dnsPolicy:   ClusterFirstWithHostNet
       serviceAccountName: kubernetes-dashboard-alloy
       securityContext:
         runAsNonRoot: true
