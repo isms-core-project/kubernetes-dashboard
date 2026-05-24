@@ -15,9 +15,9 @@ Two WebUI flavors share a single Go API backend — deploy the one that fits you
 | **Web image** | `dashboard-web-react-mui-latest` | `dashboard-web-angular-latest` |
 | **Manifests** | `manifests_webui_react+mui/manifests/` | `manifests_webui_angular/` |
 | **Deploy guide** | [DEPLOY-REACT.md](DEPLOY-REACT.md) | [DEPLOY-ANGULAR.md](DEPLOY-ANGULAR.md) |
-| **Cert Manager UI** | — | ✅ |
-| **MetalLB UI** | — | ✅ |
-| **Pod Security / Network** | — | ✅ |
+| **Cert Manager UI** | ✅ | ✅ |
+| **MetalLB UI** | ✅ | ✅ |
+| **Pod Security / Network** | ✅ | ✅ |
 
 Both flavors use the same Go images: `dashboard-api`, `dashboard-auth`, `dashboard-metrics-scraper`, and Kong 3.6. All images pull from `ghcr.io/isms-core-project/kubernetes-dashboard`.
 
