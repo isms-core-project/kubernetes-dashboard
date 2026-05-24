@@ -1,8 +1,20 @@
 # Kubernetes Dashboard
 
-A maintained continuation of the archived [kubernetes-retired/dashboard](https://github.com/kubernetes-retired/dashboard), extended with production-grade features for homelab and small-team clusters.
+The original [kubernetes/dashboard](https://github.com/kubernetes-retired/dashboard) was archived in 2024 with this message:
 
-Two WebUI flavors share a single Go API backend — deploy the one that fits your stack.
+> *"This project is now archived and no longer maintained due to lack of active maintainers and contributors. Thank you to everyone who used, starred, or contributed to this project! Feel free to fork this repository if you want to continue development yourself. Please consider using Headlamp instead."*
+
+We took up the challenge.
+
+The Go API backend was solid and worth keeping. The Angular WebUI was Angular 16 — already one major version behind at archive time, and drifting further every month. Rather than let it rot, we forked it and got to work.
+
+**First attempt:** jump the Angular WebUI straight from v16 to v21. That failed — four compounding blockers mean a direct jump is impossible (abandoned flex-layout, deleted SCSS entrypoints, a builder that no longer exists). So we built a **React + Material UI** WebUI from scratch on the same Go backend, shipping something production-ready while we worked out the proper incremental upgrade path.
+
+**Second attempt:** step through every Angular major version one at a time — 16 → 17 → 18 → 19 → 20 → 21 — fixing all 44 catalogued breaking changes along the way. That worked. See [ANGULAR-UPGRADE.md](ANGULAR-UPGRADE.md) for the full story.
+
+The result is two production-grade WebUI flavors on a shared Go backend, both actively maintained.
+
+Two WebUI flavors — deploy the one that fits your stack.
 
 ---
 
