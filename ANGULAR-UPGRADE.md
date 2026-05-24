@@ -185,7 +185,10 @@ The Angular flavor also retains features the React version does not have:
 
 - 5 QA rounds before the upgrade was considered stable
 - 5-stage regression analysis covering: runtime correctness, visual regressions, memory leaks, feature gaps, performance
-- Real-cluster smoke test against a K3s cluster (NUC-02, k8s-native namespace)
+- Real-cluster smoke test against a K3s cluster with all three flavors running simultaneously in separate namespaces:
+  - `k8s-dash-legacy` — original Helm chart installation
+  - `k8s-dash-react-mui` — React + Material UI flavor
+  - `k8s-dash-angular` — this Angular flavor (under test)
 - All action paths tested: login, theme toggle, workloads list, pod detail, logs, exec terminal, settings sliders, create YAML, nav pin/unpin, all 14 new feature pages
 
 ---
