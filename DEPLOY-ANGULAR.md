@@ -2,7 +2,7 @@
 
 Full runbook for the Angular flavor of the Kubernetes Dashboard.
 
-Namespace: `k8s-native`  
+Namespace: `kubernetes-dashboard`  
 Web image: `ghcr.io/isms-core-project/kubernetes-dashboard:dashboard-web-angular-latest`
 
 ---
@@ -59,7 +59,7 @@ Hardened variant adds: `readOnlyRootFilesystem`, `runAsNonRoot`, `drop ALL` capa
 Verify all pods reach Running:
 
 ```bash
-kubectl get all -n k8s-native
+kubectl get all -n kubernetes-dashboard
 ```
 
 ---
@@ -88,7 +88,7 @@ Three manifest options are provided:
 Get the login token (replace `admin-user` with the account name you applied):
 
 ```bash
-kubectl get secret admin-user -n k8s-native \
+kubectl get secret admin-user -n kubernetes-dashboard \
   -o jsonpath='{.data.token}' | base64 -d
 ```
 
@@ -130,7 +130,7 @@ current pod spec and recent events are automatically injected as context.
 Create the secret with your Anthropic API key:
 
 ```bash
-kubectl -n k8s-native create secret generic k8s-native-ai-secret \
+kubectl -n kubernetes-dashboard create secret generic kubernetes-dashboard-ai \
   --from-literal=api-key="sk-ant-..."
 ```
 
@@ -156,7 +156,7 @@ disabled from the dashboard Settings page.
 Requires a Microsoft Graph API application registration (used for sending mail):
 
 ```bash
-kubectl -n k8s-native create secret generic k8s-native-notifications-secret \
+kubectl -n kubernetes-dashboard create secret generic kubernetes-dashboard-notifications \
   --from-literal=tenant-id="..." \
   --from-literal=client-id="..." \
   --from-literal=client-secret="..." \
@@ -185,7 +185,7 @@ cluster — no configuration required:
 ## Tear Down
 
 ```bash
-kubectl delete namespace k8s-native
+kubectl delete namespace kubernetes-dashboard
 ```
 
 This removes all dashboard resources. Persistent data (configmaps, secrets) is deleted with the namespace.

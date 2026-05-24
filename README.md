@@ -1,6 +1,6 @@
 # Kubernetes Dashboard
 
-The original [kubernetes/dashboard](https://github.com/kubernetes-retired/dashboard) was archived in 2024 with this message:
+The original [kubernetes/dashboard](https://github.com/kubernetes-retired/dashboard) was archived in January 2026 with this message:
 
 > *"This project is now archived and no longer maintained due to lack of active maintainers and contributors. Thank you to everyone who used, starred, or contributed to this project! Feel free to fork this repository if you want to continue development yourself. Please consider using Headlamp instead."*
 
@@ -23,7 +23,7 @@ Two WebUI flavors — deploy the one that fits your stack.
 | | React + Material UI | Angular + Angular Material |
 |---|---|---|
 | **Framework** | React 19, MUI v6 | Angular 21, Angular Material |
-| **Namespace** | `kubernetes-dashboard` | `k8s-dash-angular` |
+| **Namespace** | `kubernetes-dashboard` | `kubernetes-dashboard` |
 | **Web image** | `dashboard-web-react-mui-latest` | `dashboard-web-angular-latest` |
 | **Manifests** | `manifests_webui_react+mui/manifests/` | `manifests_webui_angular/manifests/` |
 | **Deploy guide** | [DEPLOY-REACT.md](DEPLOY-REACT.md) | [DEPLOY-ANGULAR.md](DEPLOY-ANGULAR.md) |
@@ -49,8 +49,8 @@ Both flavors use the same Go images: `dashboard-api`, `dashboard-auth`, `dashboa
 - **Event Timeline** — live event feed with time-bucket grouping and warning highlight
 - **Registry Manager** — docker pull secrets cross-referenced with pod `imagePullSecrets`
 - **Historical Metrics** — pod CPU/memory sparklines with 1h/6h/24h/7d selector (VictoriaMetrics or Prometheus)
-- **Cluster Shell** — interactive xterm.js terminal exec'd into the dashboard pod; kubectl runs as the user's JWT
-- **AI Assistant** — Claude Sonnet via SSE streaming; pod spec and events auto-injected from detail pages
+- **Cluster Shell** — interactive xterm.js terminal exec'd into the dashboard pod; kubectl runs as the user's JWT *(React+MUI only)*
+- **AI Assistant** — Claude Sonnet via SSE streaming; pod spec and events auto-injected from detail pages *(React+MUI only)*
 - **Event Alerts** — real-time email on CrashLoop/OOM/ImagePullBackOff/NodeNotReady; configurable per type
 - **Pod Logs** — live streaming, timestamps, severity filter, text filter, download
 
