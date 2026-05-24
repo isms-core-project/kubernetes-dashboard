@@ -202,4 +202,4 @@ All images are public on GitHub Container Registry — no pull credentials neede
 | API | `ghcr.io/isms-core-project/kubernetes-dashboard:dashboard-api-latest` |
 | Auth | `ghcr.io/isms-core-project/kubernetes-dashboard:dashboard-auth-latest` |
 | Metrics scraper | `ghcr.io/isms-core-project/kubernetes-dashboard:dashboard-metrics-scraper-latest` |
-| Kong | `kong:3.6` |
+| Kong | `kong:3.9.1` |

@@ -417,7 +417,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kong
-          image: kong:3.6
+          image: kong:3.9.1
           imagePullPolicy: IfNotPresent
           env:
             - name: KONG_DATABASE
