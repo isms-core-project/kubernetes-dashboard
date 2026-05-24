@@ -25,7 +25,7 @@ Two WebUI flavors — deploy the one that fits your stack.
 | **Framework** | React 19, MUI v6 | Angular 21, Angular Material |
 | **Namespace** | `kubernetes-dashboard` | `k8s-dash-angular` |
 | **Web image** | `dashboard-web-react-mui-latest` | `dashboard-web-angular-latest` |
-| **Manifests** | `manifests_webui_react+mui/manifests/` | `manifests_webui_angular/` |
+| **Manifests** | `manifests_webui_react+mui/manifests/` | `manifests_webui_angular/manifests/` |
 | **Deploy guide** | [DEPLOY-REACT.md](DEPLOY-REACT.md) | [DEPLOY-ANGULAR.md](DEPLOY-ANGULAR.md) |
 | **Cert Manager UI** | ✅ | ✅ |
 | **MetalLB UI** | ✅ | ✅ |

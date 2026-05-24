@@ -15,7 +15,7 @@ metrics-server must be running in `kube-system` for CPU/memory current-usage dat
 K3s includes it by default. On native Kubernetes (kubeadm, Talos, etc.) apply it first:
 
 ```bash
-kubectl apply -f manifests_webui_angular/00-prereqs-metrics-server.yaml
+kubectl apply -f manifests_webui_angular/manifests/00-prereqs-metrics-server.yaml
 kubectl rollout status deployment/metrics-server -n kube-system
 ```
 
@@ -26,14 +26,14 @@ Safe to run on clusters that already have metrics-server — `kubectl apply` wil
 ## Deploy (Standard)
 
 ```bash
-kubectl apply -f manifests_webui_angular/00-namespace.yaml
-kubectl apply -f manifests_webui_angular/01-secrets.yaml
-kubectl apply -f manifests_webui_angular/02-configmap.yaml
-kubectl apply -f manifests_webui_angular/03-ai-secret.yaml       # Optional — AI assistant (see below)
-kubectl apply -f manifests_webui_angular/10-rbac.yaml
-kubectl apply -f manifests_webui_angular/20-deployments.yaml
-kubectl apply -f manifests_webui_angular/50-services.yaml
-kubectl apply -f manifests_webui_angular/60-admin-user.yaml
+kubectl apply -f manifests_webui_angular/manifests/00-namespace.yaml
+kubectl apply -f manifests_webui_angular/manifests/01-secrets.yaml
+kubectl apply -f manifests_webui_angular/manifests/02-configmap.yaml
+kubectl apply -f manifests_webui_angular/manifests/03-ai-secret.yaml       # Optional — AI assistant (see below)
+kubectl apply -f manifests_webui_angular/manifests/10-rbac.yaml
+kubectl apply -f manifests_webui_angular/manifests/20-deployments.yaml
+kubectl apply -f manifests_webui_angular/manifests/50-services.yaml
+kubectl apply -f manifests_webui_angular/manifests/60-admin-user.yaml
 ```
 
 ## Deploy (Hardened)
@@ -41,16 +41,16 @@ kubectl apply -f manifests_webui_angular/60-admin-user.yaml
 Use `20-deployments-hardened.yaml` and apply the NetworkPolicy last:
 
 ```bash
-kubectl apply -f manifests_webui_angular/00-namespace.yaml
-kubectl apply -f manifests_webui_angular/01-secrets.yaml
-kubectl apply -f manifests_webui_angular/02-configmap.yaml
-kubectl apply -f manifests_webui_angular/03-ai-secret.yaml            # Optional — AI assistant
-kubectl apply -f manifests_webui_angular/04-notifications-secret.yaml # Optional — email alerts
-kubectl apply -f manifests_webui_angular/10-rbac.yaml
-kubectl apply -f manifests_webui_angular/20-deployments-hardened.yaml
-kubectl apply -f manifests_webui_angular/50-services.yaml
-kubectl apply -f manifests_webui_angular/60-admin-user.yaml
-kubectl apply -f manifests_webui_angular/99-network-policy.yaml
+kubectl apply -f manifests_webui_angular/manifests/00-namespace.yaml
+kubectl apply -f manifests_webui_angular/manifests/01-secrets.yaml
+kubectl apply -f manifests_webui_angular/manifests/02-configmap.yaml
+kubectl apply -f manifests_webui_angular/manifests/03-ai-secret.yaml            # Optional — AI assistant
+kubectl apply -f manifests_webui_angular/manifests/04-notifications-secret.yaml # Optional — email alerts
+kubectl apply -f manifests_webui_angular/manifests/10-rbac.yaml
+kubectl apply -f manifests_webui_angular/manifests/20-deployments-hardened.yaml
+kubectl apply -f manifests_webui_angular/manifests/50-services.yaml
+kubectl apply -f manifests_webui_angular/manifests/60-admin-user.yaml
+kubectl apply -f manifests_webui_angular/manifests/99-network-policy.yaml
 ```
 
 Hardened variant adds: `readOnlyRootFilesystem`, `runAsNonRoot`, `drop ALL` capabilities,
@@ -100,8 +100,8 @@ When deployed, pod detail pages gain CPU and memory sparklines with a 1h/6h/24h/
 selector. The Cluster Overview page also shows a live Network Traffic graph.
 
 ```bash
-kubectl apply -f manifests_webui_angular/25-alloy.yaml            # Network Traffic graph
-kubectl apply -f manifests_webui_angular/26-victoriametrics.yaml  # sparklines + trend arrows
+kubectl apply -f manifests_webui_angular/manifests/25-alloy.yaml            # Network Traffic graph
+kubectl apply -f manifests_webui_angular/manifests/26-victoriametrics.yaml  # sparklines + trend arrows
 ```
 
 Or, if you already run **kube-prometheus-stack**, skip the VictoriaMetrics manifest and set
@@ -115,7 +115,7 @@ Alloy is the metrics push agent. It scrapes node network interface stats and pus
 VictoriaMetrics, enabling the live Network Traffic graph on the Cluster Overview page.
 
 ```bash
-kubectl apply -f manifests_webui_angular/25-alloy.yaml
+kubectl apply -f manifests_webui_angular/manifests/25-alloy.yaml
 ```
 
 Requires VictoriaMetrics to be running. The graph does not appear without both.
