@@ -1,239 +1,252 @@
 # Kubernetes Dashboard
 
-Production deployment manifests for the Kubernetes Dashboard — a maintained continuation of the archived [kubernetes-retired/dashboard](https://github.com/kubernetes-retired/dashboard), rebuilt with React 19 and Material UI v6.
+A maintained continuation of the archived [kubernetes-retired/dashboard](https://github.com/kubernetes-retired/dashboard), extended with production-grade features for homelab and small-team clusters.
+
+Two WebUI flavors share a single Go API backend — deploy the one that fits your stack.
 
 ---
 
-## Screenshots
+## Flavors
+
+| | React + Material UI | Angular + Angular Material |
+|---|---|---|
+| **Framework** | React 19, MUI v6 | Angular 21, Angular Material |
+| **Namespace** | `kubernetes-dashboard` | `k8s-dash-angular` |
+| **Web image** | `dashboard-web-react-mui-latest` | `dashboard-web-angular-latest` |
+| **Manifests** | `manifests_webui_react+mui/manifests/` | `manifests_webui_angular/` |
+| **Deploy guide** | [DEPLOY-REACT.md](DEPLOY-REACT.md) | [DEPLOY-ANGULAR.md](DEPLOY-ANGULAR.md) |
+| **Cert Manager UI** | — | ✅ |
+| **MetalLB UI** | — | ✅ |
+| **Pod Security / Network** | — | ✅ |
+
+Both flavors use the same Go images: `dashboard-api`, `dashboard-auth`, `dashboard-metrics-scraper`, and Kong 3.6. All images pull from `ghcr.io/isms-core-project/kubernetes-dashboard`.
+
+---
+
+## Shared Features
+
+- **Cluster Health Overview** — stat tiles, donut charts, live Network Traffic graph (Grafana Alloy)
+- **Workloads** — full list + detail for Deployments, DaemonSets, StatefulSets, Jobs, Cron Jobs, Replica Sets
+- **Workload Actions** — edit YAML, restart, scale, rollback, pause/resume, exec shell — all RBAC-aware
+- **Cluster Map** — namespace-scoped topology view with health filter and zoom
+- **Application Projects** — per-namespace cards with pod health and resource totals
+- **Policy Audit** — Polaris-native security scoring (0–100) per workload
+- **Resource Efficiency** — Goldilocks-style CPU/memory request vs limit vs actual; trend arrows via VictoriaMetrics
+- **RBAC Viewer** — cluster-wide role binding table with wildcard detection
+- **Certificate Tracker** — TLS secrets parsed with `crypto/x509`; expiry countdown and status badges
+- **Event Timeline** — live event feed with time-bucket grouping and warning highlight
+- **Registry Manager** — docker pull secrets cross-referenced with pod `imagePullSecrets`
+- **Historical Metrics** — pod CPU/memory sparklines with 1h/6h/24h/7d selector (VictoriaMetrics or Prometheus)
+- **Cluster Shell** — interactive xterm.js terminal exec'd into the dashboard pod; kubectl runs as the user's JWT
+- **AI Assistant** — Claude Sonnet via SSE streaming; pod spec and events auto-injected from detail pages
+- **Event Alerts** — real-time email on CrashLoop/OOM/ImagePullBackOff/NodeNotReady; configurable per type
+- **Pod Logs** — live streaming, timestamps, severity filter, text filter, download
+
+---
+
+## Screenshots — React + Material UI
 
 ### Sign In
-![Sign in screen](screenshots/k8s_dashboard_logon.png)
+![Sign in](screenshots_webui_react+mui/k8s_dashboard_logon.png)
 
 ### Overview
-Stat tiles (Nodes, Pods, Warnings, Policy Score, Certificates, CVEs), donut charts (Pod Health, Resource Efficiency, Policy Audit, Certificates, Kubescape — detection-gated), and a live Network Traffic graph when Grafana Alloy is deployed.
+Stat tiles, donut charts, and live Network Traffic graph.
 
-![Overview](screenshots/k8s_dashboard_overview.png)
+![Overview](screenshots_webui_react+mui/k8s_dashboard_overview.png)
 
 ### Workloads
-Full workload list across Deployments, DaemonSets, StatefulSets, Jobs, and more — with status, restart count, and inline actions.
+Full workload list with status, restart count, and inline actions.
 
-![Workloads](screenshots/k8s_dashboard_home.png)
+![Workloads](screenshots_webui_react+mui/k8s_dashboard_home.png)
 
 ### Cluster Map
-Namespace-scoped topology view of every Deployment, DaemonSet, and StatefulSet — with Error/Warning filter and zoom controls.
+Namespace-scoped topology with Error/Warning filter and zoom.
 
-![Cluster map](screenshots/k8s_dashboard_map.png)
+![Cluster map](screenshots_webui_react+mui/k8s_dashboard_map.png)
 
 ### Pods
-Full pod list with live CPU/Memory sparklines, restart count, node assignment, and inline log/shell/edit/delete actions.
+Live CPU/Memory sparklines, restart count, node assignment, inline actions.
 
-![Pods list](screenshots/k8s_dashboard_pods.png)
-
-### Nodes
-Per-node CPU and memory request percentages, usage sparklines, pod capacity, and readiness status.
-
-![Nodes list](screenshots/k8s_dashboard_nodes.png)
+![Pods](screenshots_webui_react+mui/k8s_dashboard_pods.png)
 
 ### Policy Audit
-Polaris-native security scoring (0–100) per workload — danger and warning counts, namespace tabs, expandable check details.
+Polaris security scoring per workload — expandable check details.
 
-![Policy audit](screenshots/k8s_dashboard_policy_audit.png)
+![Policy audit](screenshots_webui_react+mui/k8s_dashboard_policy_audit.png)
 
 ### Resource Efficiency
-Goldilocks-style request/limit/actual comparison for every container — No Limits, Hot, Cold, and OK verdicts with CSV export and trend arrows (↑↓→) when VictoriaMetrics is enabled.
+CPU/memory request vs limit vs actual — verdict chips, CSV export.
 
-![Resource efficiency](screenshots/k8s_dashboard_resource_efficiency.png)
-
-### RBAC Viewer
-Cluster-wide role binding table — subject, kind, scope, binding, and rule expansion with wildcard detection.
-
-![RBAC viewer](screenshots/k8s_dashboard_rbac_viewer.png)
+![Resource efficiency](screenshots_webui_react+mui/k8s_dashboard_resource_efficiency.png)
 
 ### Certificate Tracker
-TLS secrets scanned via `crypto/x509` — common name, SANs, issuer, expiry date, days remaining, and status badges.
+TLS secrets: common name, SANs, expiry, status badges.
 
-![Certificate tracker](screenshots/k8s_dashboard_cert_tracker.png)
+![Certificate tracker](screenshots_webui_react+mui/k8s_dashboard_cert_tracker.png)
 
 ### Event Timeline
-Live cluster event feed with time-bucket grouping, Warning highlighting, namespace filter, and auto-refresh.
+Live event feed with time-bucket grouping and warning highlight.
 
-![Event timeline](screenshots/k8s_dashboard_events_timeline.png)
+![Event timeline](screenshots_webui_react+mui/k8s_dashboard_events_timeline.png)
 
 ### Application Projects
-Per-namespace project cards with pod health, workload counts, and CPU/memory request totals. System namespaces hidden by default.
+Per-namespace project cards with pod health and resource totals.
 
-![Application projects](screenshots/k8s_dashboard_projects.png)
+![Projects](screenshots_webui_react+mui/k8s_dashboard_projects.png)
 
 ### Kubescape Security
-Compliance scores and CVE findings per workload — auto-detected when Kubescape Operator is running.
+Compliance scores and CVE findings — auto-detected when Kubescape Operator is running.
 
-![Kubescape config scan](screenshots/k8s_dashboard_kubescape.png)
+![Kubescape](screenshots_webui_react+mui/k8s_dashboard_kubescape.png)
 
 ### VictoriaMetrics Sparklines
-Pod CPU and memory sparklines with 1h/6h/24h/7d time range selector — opt-in via `VM_ENDPOINT`.
+Pod CPU/memory sparklines with 1h/6h/24h/7d selector.
 
-![VictoriaMetrics sparklines](screenshots/k8s_dashboard_victoriametrics.png)
+![VictoriaMetrics](screenshots_webui_react+mui/k8s_dashboard_victoriametrics.png)
 
 ### PVC Storage Usage
-Persistent Volume Claims with live usage bars sourced from the kubelet stats API.
+Live usage bars from the kubelet stats API.
 
-![PVC storage usage](screenshots/k8s_dashboard_pvc.png)
+![PVC storage](screenshots_webui_react+mui/k8s_dashboard_pvc.png)
+
+### RBAC Viewer
+All role bindings with resolved rules and wildcard detection.
+
+![RBAC viewer](screenshots_webui_react+mui/k8s_dashboard_rbac_viewer.png)
 
 ### Cluster Shell
-Full interactive bash terminal (xterm.js) exec'd directly into the dashboard pod. kubectl is pre-configured with your login token, so every command runs with your actual RBAC permissions — no separate kubeconfig or port-forward needed.
+Full interactive bash terminal — kubectl runs as the logged-in user.
 
-![Cluster Shell](screenshots/k8s_dashboard_shell.png)
+![Cluster Shell](screenshots_webui_react+mui/k8s_dashboard_shell.png)
+
+---
+
+## Screenshots — Angular + Angular Material
+
+### Sign In
+![Sign in](screenshots_webui_angular/k8s_dashboard_logon.png)
+
+### Overview
+Stat tiles, donut charts, and Network Traffic graph.
+
+![Overview](screenshots_webui_angular/k8s_dashboard_overview.png)
+
+### Workloads
+Full workload list with status, restart count, and inline actions.
+
+![Workloads](screenshots_webui_angular/k8s_dashboard_home.png)
+
+### Cluster Map
+Namespace-scoped topology with health filter and zoom.
+
+![Cluster map](screenshots_webui_angular/k8s_dashboard_map.png)
+
+### Pods
+Live CPU/Memory sparklines, restart count, node assignment.
+
+![Pods](screenshots_webui_angular/k8s_dashboard_pods.png)
+
+### Nodes
+Per-node CPU and memory request percentages and pod capacity.
+
+![Nodes](screenshots_webui_angular/k8s_dashboard_nodes.png)
+
+### Policy Audit
+Polaris security scoring per workload.
+
+![Policy audit](screenshots_webui_angular/k8s_dashboard_policy_audit.png)
+
+### Resource Efficiency
+Goldilocks-style CPU/memory comparison with trend arrows.
+
+![Resource efficiency](screenshots_webui_angular/k8s_dashboard_resource_efficiency.png)
+
+### Certificate Manager
+cert-manager Certificates, Issuers, and ClusterIssuers — auto-detected.
+
+![Certificate Manager](screenshots_webui_angular/k8s_dashboard_cert_manager.png)
+
+### Certificate Tracker
+TLS secrets scanned with `crypto/x509` — expiry countdown and status badges.
+
+![Certificate tracker](screenshots_webui_angular/k8s_dashboard_cert_tracker.png)
+
+### MetalLB
+IP Address Pools and L2 Advertisements — auto-detected when MetalLB CRDs are present.
+
+![MetalLB](screenshots_webui_angular/k8s_dashboard_metallb.png)
+
+### Pod Security / Network Policies
+Pod Security Standards and NetworkPolicy visualisation.
+
+![Pod security](screenshots_webui_angular/k8s_dashboard_pod_sec_net.png)
+
+### Event Timeline
+Live event feed with time-bucket grouping.
+
+![Event timeline](screenshots_webui_angular/k8s_dashboard_events_timeline.png)
+
+### Application Projects
+Per-namespace project cards.
+
+![Projects](screenshots_webui_angular/k8s_dashboard_projects.png)
+
+### Kubescape Security
+Compliance scores and CVE findings — auto-detected.
+
+![Kubescape](screenshots_webui_angular/k8s_dashboard_kubescape.png)
+
+### VictoriaMetrics Sparklines
+Pod CPU/memory sparklines with 1h/6h/24h/7d selector.
+
+![VictoriaMetrics](screenshots_webui_angular/k8s_dashboard_victoriametrics.png)
+
+### PVC Storage Usage
+Live usage bars from the kubelet stats API.
+
+![PVC storage](screenshots_webui_angular/k8s_dashboard_pvc.png)
+
+### RBAC Viewer
+All role bindings with resolved rules and wildcard detection.
+
+![RBAC viewer](screenshots_webui_angular/k8s_dashboard_rbac_viewer.png)
+
+### Cluster Shell
+Full interactive bash terminal.
+
+![Cluster Shell](screenshots_webui_angular/k8s_dashboard_shell.png)
 
 ---
 
 ## Architecture
 
-Five pods in the `kubernetes-dashboard` namespace, fronted by a Kong API gateway:
+Five pods in the dashboard namespace, fronted by a Kong API gateway:
 
 ```
 Browser
-  └── Kong 3.6 (DBless, LoadBalancer)
+  └── Kong 3.6 (DBless, NodePort :30080)
         ├── /api/v1/login, /csrftoken, /me   → dashboard-auth
         ├── /api/*                            → dashboard-api
         │     └── sidecar: dashboard-metrics-scraper
-        └── /                                 → dashboard-web (React SPA)
+        └── /                                 → dashboard-web (SPA)
 ```
 
 Optional add-ons (all in the same namespace):
 
 | Add-on | Manifest | Enables |
 |---|---|---|
-| Grafana Alloy | `25-alloy.yaml` | Network Traffic graph on Overview page — push model, no port conflicts |
+| Grafana Alloy | `25-alloy.yaml` | Network Traffic graph on Overview |
 | VictoriaMetrics | `26-victoriametrics.yaml` | Pod CPU/memory sparklines, trend arrows, network graph |
-| Prometheus | External (`kube-prometheus-stack`) | Same sparklines and trends as VictoriaMetrics — set `PROMETHEUS_ENDPOINT` in `20-deployments-hardened.yaml` instead of `VM_ENDPOINT` |
+| Prometheus | External (`kube-prometheus-stack`) | Same sparklines — set `PROMETHEUS_ENDPOINT` instead of `VM_ENDPOINT` |
 
 ---
 
 ## Deploy
 
-Images are published to GitHub Container Registry and pulled automatically — no build step needed.
+See the flavor-specific guide for the full runbook:
 
-```bash
-# 1. Namespace first
-kubectl apply -f manifests/00-namespace.yaml
-
-# 2. Generate CSRF key (once — save it)
-kubectl -n kubernetes-dashboard create secret generic kubernetes-dashboard-csrf \
-  --from-literal=private.key="$(openssl rand 256 | base64 | tr -d '\n')"
-
-# 3. Apply the rest
-kubectl apply -f manifests/02-configmap.yaml
-kubectl apply -f manifests/10-rbac.yaml
-kubectl apply -f manifests/20-deployments-hardened.yaml
-kubectl apply -f manifests/50-services.yaml
-kubectl apply -f manifests/99-network-policy.yaml
-
-# 4. Create a login account — choose one (see Access section below)
-kubectl apply -f manifests/60-admin-user.yaml   # cluster-admin — lab/homelab only
-```
-
-**Optional — historical metrics + Network Traffic graph:**
-
-```bash
-kubectl apply -f manifests/25-alloy.yaml
-kubectl apply -f manifests/26-victoriametrics.yaml
-```
-
-Or, if you already run **kube-prometheus-stack**, skip the VictoriaMetrics manifest and uncomment `PROMETHEUS_ENDPOINT` in `20-deployments-hardened.yaml` instead — both backends produce the same sparklines and trend arrows.
-
-Verify all pods reach Running:
-
-```bash
-kubectl get all -n kubernetes-dashboard
-```
-
-See [manifests/DEPLOY.md](manifests/DEPLOY.md) for the full runbook including AI assistant setup, notifications, Kubescape integration, and tear-down.
-
----
-
-## Access
-
-The dashboard is served via a Kong LoadBalancer service. Get the assigned IP:
-
-```bash
-kubectl get svc kubernetes-dashboard-kong -n kubernetes-dashboard
-```
-
-### Login Accounts
-
-Three manifest options are provided. Pick the one that fits your use case — you can apply more than one.
-
-| Manifest | Account | Permissions | Use case |
-|---|---|---|---|
-| `60-admin-user.yaml` | `admin-user` | `cluster-admin` (full cluster) | Homelab, local dev, initial setup |
-| `61-readonly-user.yaml` | `readonly-user` | Built-in `view` (read-only cluster-wide, no Secrets) | Monitoring users, on-call engineers, auditors |
-| `62-namespace-user.yaml` | `namespace-user` | Built-in `admin` scoped to one namespace | Team leads, developers who own a namespace |
-
-> **Production note:** `60-admin-user.yaml` grants unrestricted cluster-admin access.
-> For shared or production clusters use `61-readonly-user.yaml` or `62-namespace-user.yaml` instead,
-> or create scoped tokens for each person using your own RBAC policy.
-
-**Get the login token** (replace `admin-user` with the account name you applied):
-
-```bash
-kubectl get secret admin-user -n kubernetes-dashboard \
-  -o jsonpath='{.data.token}' | base64 -d
-```
-
----
-
-## Features
-
-### Standard Kubernetes Resources
-
-| Area | Details |
-|---|---|
-| **Workloads** | Cron Jobs, Daemon Sets, Deployments, Jobs, Pods, Replica Sets, Replication Controllers, Stateful Sets — full list + detail views |
-| **Service** | Ingresses, Ingress Classes, Services |
-| **Config & Storage** | Config Maps, Persistent Volume Claims, Secrets, Storage Classes |
-| **Cluster** | Cluster Roles/Bindings, Events, Namespaces, Network Policies, Nodes, Persistent Volumes, Roles/Bindings, Service Accounts |
-| **Custom Resource Definitions** | CRD list, detail, and per-CRD object browser |
-| **Gateway API** | GatewayClasses, Gateways, HTTPRoutes — shown automatically when `gateway.networking.k8s.io` CRDs are detected |
-| **Kubescape** | Config scan scores, CVE findings, eBPF NetworkPolicy generator — shown automatically when Kubescape Operator is running |
-| **Cert Manager** | Certificates, Issuers, and ClusterIssuers with ready status, expiry countdown, and issuer reference — shown automatically when `cert-manager.io` CRDs are detected |
-| **MetalLB** | IP Address Pools (address ranges, IPv4 utilisation bar) and L2 Advertisements (pools + interfaces) — shown automatically when `metallb.io` CRDs are detected |
-| **Pod Logs** | Live streaming, timestamps, previous container, severity filter (ALL / ERROR / WARN / INFO / DEBUG), text filter, line count, download |
-| **Pod Shell** | Interactive xterm.js terminal, shell selector, RBAC-aware exec button (disabled with tooltip when `pods/exec` permission is absent) |
-
-### Native Extended Features
-
-| Feature | Route | Description |
-|---|---|---|
-| **Cluster Health Overview** | `/overview` | Landing page. Stat tiles (Nodes, Pods, Warnings, Policy Score, Certs, CVEs), donut charts (Pod Health, Efficiency, Policy, Certs, Kubescape), live Network Traffic graph (Grafana Alloy required) |
-| **Registry Manager** | `/registries` | All `kubernetes.io/dockerconfigjson` secrets parsed and cross-referenced with pod `imagePullSecrets` — shows workload usage per registry, flags unused secrets |
-| **Cluster Map** | `/map` | All workloads grouped by namespace as colour-coded health cards — zoom 40–150% |
-| **Policy Audit** | `/audit` | 14 Polaris-style security checks per workload, scored 0–100, filterable by severity |
-| **Resource Efficiency** | `/efficiency` | Goldilocks-style: CPU/memory requests vs limits vs actual, verdict chips, CSV export, trend arrows (↑↓→) when VictoriaMetrics is enabled |
-| **RBAC Viewer** | `/rbac` | All bindings with resolved rules, wildcard detection, filter by subject / scope / kind |
-| **Certificate Tracker** | `/certs` | TLS secrets parsed with `crypto/x509` — expiry countdown, status badges, SAN display |
-| **Event Timeline** | `/timeline` | Live event feed (5 s refresh), time-bucketed, warning highlight, text filter |
-| **Application Projects** | `/projects` | Per-namespace project cards with pod health, workload counts, and CPU/memory request totals |
-| **Storage Usage** | PV/PVC pages | Real-time PVC usage via kubelet stats — used/available/capacity per volume, aggregate donut on list pages |
-| **AI Assistant** | AppBar | Claude Sonnet via SSE streaming — pod spec and recent events auto-injected when opened from a pod detail page |
-| **Health Digest** | Background | Daily cluster health email (score, namespace table, top issues) via Microsoft Graph API |
-| **Event Alerts** | Background | Real-time email on CrashLoop / OOM / ImagePullBackOff / NodeNotReady / PVC issues; 1 h dedup per workload; configurable per type |
-| **ISMS Core Integration** | `GET /api/v1/summary` | Machine-readable cluster health snapshot — node status, pod phases, policy score, cert expiry counts |
-| **VictoriaMetrics / Prometheus** | Optional | Pod CPU/memory sparklines + trend arrows on Resource Efficiency; Network Traffic graph on Overview (Grafana Alloy also required). Set `VM_ENDPOINT` for VictoriaMetrics or `PROMETHEUS_ENDPOINT` for kube-prometheus-stack — both coexist |
-| **Cluster Shell** | AppBar | Full interactive bash terminal (xterm.js) exec'd into the dashboard API pod — kubectl runs as the logged-in user's JWT so permissions reflect their RBAC |
-
-### Workload Actions
-
-All workload detail pages include RBAC-aware action buttons (disabled with tooltip when the user's token lacks permission):
-
-| Action | Deployments | DaemonSets | StatefulSets |
-|---|---|---|---|
-| Edit YAML / JSON | ✅ | ✅ | ✅ |
-| Delete | ✅ | ✅ | ✅ |
-| Restart (`kubectl rollout restart`) | ✅ | ✅ | ✅ |
-| Scale | ✅ | — | ✅ |
-| Rollback with revision history | ✅ | ✅ | ✅ |
-| Pause / Resume | ✅ | — | — |
-| Exec / Shell | ✅ | ✅ | ✅ |
+- **React + Material UI:** [DEPLOY-REACT.md](DEPLOY-REACT.md)
+- **Angular + Angular Material:** [DEPLOY-ANGULAR.md](DEPLOY-ANGULAR.md)
 
 ---
 

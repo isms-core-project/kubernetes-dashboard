@@ -1,0 +1,217 @@
+---
+# =============================================================================
+# 25-alloy.yaml — Grafana Alloy DaemonSet (node metrics for Network Traffic graph)
+#
+# Compatible: K8s, K3s, Talos Linux
+#
+# Replaces node-exporter. Alloy uses prometheus.exporter.unix (same collectors)
+# and pushes directly to VictoriaMetrics via remote_write — no hostPort, no
+# scrape config volume, no StatefulSet patching required.
+#
+# Deploy order (either order works — Alloy retries remote_write until VM is ready):
+#   kubectl apply -f 25-alloy.yaml
+#   kubectl apply -f 26-victoriametrics.yaml
+#
+# If upgrading from node-exporter, clean up the old resources first:
+#   kubectl delete daemonset kubernetes-dashboard-node-exporter -n kubernetes-dashboard
+#   kubectl delete service kubernetes-dashboard-node-exporter -n kubernetes-dashboard
+#   kubectl delete configmap kubernetes-dashboard-vm-scrape -n kubernetes-dashboard
+#   kubectl delete clusterrole kubernetes-dashboard-vm-sd
+#   kubectl delete clusterrolebinding kubernetes-dashboard-vm-sd
+#   kubectl delete serviceaccount kubernetes-dashboard-vm-sd -n kubernetes-dashboard
+# =============================================================================
+
+# ── ServiceAccount — no ClusterRole needed (Alloy does not query the k8s API) ─
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubernetes-dashboard-alloy
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/component: alloy
+
+# ── Alloy config — collect host metrics, label with node name, push to VM ─────
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubernetes-dashboard-alloy-config
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/component: alloy
+data:
+  config.alloy: |
+    // Collect host node metrics via built-in unix exporter
+    prometheus.exporter.unix "node" {
+      rootfs_path  = "/host"
+      procfs_path  = "/host/proc"
+      sysfs_path   = "/host/sys"
+      set_collectors = [
+        "cpu",
+        "meminfo",
+        "diskstats",
+        "filesystem",
+        "loadavg",
+        "netdev",
+        "uname",
+      ]
+
+      filesystem {
+        mount_points_exclude = "^/(dev|proc|sys|run/k3s|var/lib/kubelet|var/lib/containerd|run/containerd)($|/)"
+      }
+    }
+
+    // Scrape the local exporter
+    prometheus.scrape "node" {
+      targets         = prometheus.exporter.unix.node.targets
+      forward_to      = [prometheus.relabel.add_node_label.receiver]
+      scrape_interval = "30s"
+      scrape_timeout  = "10s"
+    }
+
+    // Tag all metrics with the physical node name (injected via NODE_NAME env var)
+    prometheus.relabel "add_node_label" {
+      forward_to = [prometheus.relabel.drop_virtual_nics.receiver]
+
+      rule {
+        target_label = "node"
+        replacement  = env("NODE_NAME")
+      }
+
+      rule {
+        target_label = "instance"
+        replacement  = env("NODE_NAME")
+      }
+    }
+
+    // Drop virtual/container network interfaces (same filter as the old VM scrape config)
+    prometheus.relabel "drop_virtual_nics" {
+      forward_to = [prometheus.remote_write.vm.receiver]
+
+      rule {
+        source_labels = ["device"]
+        regex         = "lo|veth.+|cni.+|flannel.+|docker.+|br-.+|tunl.+|kube.+|dummy.+"
+        action        = "drop"
+      }
+    }
+
+    // Push to VictoriaMetrics
+    prometheus.remote_write "vm" {
+      endpoint {
+        url = "http://kubernetes-dashboard-victoriametrics:8428/api/v1/write"
+      }
+    }
+
+# ── DaemonSet ─────────────────────────────────────────────────────────────────
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kubernetes-dashboard-alloy
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/name: kubernetes-dashboard-alloy
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/component: alloy
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubernetes-dashboard-alloy
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kubernetes-dashboard-alloy
+        app.kubernetes.io/part-of: kubernetes-dashboard
+    spec:
+      # hostNetwork: required so prometheus.exporter.unix netdev collector reads the
+      # host's /proc/net/dev (host network namespace), not the container's eth0.
+      # Push model means no hostPort is needed — Alloy pushes out, doesn't listen.
+      hostNetwork: true
+      dnsPolicy:   ClusterFirstWithHostNet
+      serviceAccountName: kubernetes-dashboard-alloy
+      securityContext:
+        runAsNonRoot: true
+        runAsUser:    65534   # nobody
+        runAsGroup:   65534
+        seccompProfile:
+          type: RuntimeDefault
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+        - operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 30
+      containers:
+        - name: alloy
+          # Check https://github.com/grafana/alloy/releases for latest stable
+          image: grafana/alloy:v1.5.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/var/lib/alloy
+            - --server.http.listen-addr=0.0.0.0:12345
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          ports:
+            - name: http-metrics
+              containerPort: 12345
+              protocol: TCP
+          resources:
+            requests:
+              cpu:    20m
+              memory: 64Mi
+            limits:
+              cpu:    200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem:   true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy
+              readOnly: true
+            - name: root
+              mountPath: /host
+              readOnly: true
+              mountPropagation: HostToContainer
+            - name: wal
+              mountPath: /var/lib/alloy
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 12345
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 12345
+            initialDelaySeconds: 5
+            periodSeconds: 15
+      volumes:
+        - name: config
+          configMap:
+            name: kubernetes-dashboard-alloy-config
+        - name: root
+          hostPath:
+            path: /
+        - name: wal
+          emptyDir: {}

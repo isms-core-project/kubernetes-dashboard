@@ -258,7 +258,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kubernetes-dashboard-web
-          image: ghcr.io/isms-core-project/kubernetes-dashboard:dashboard-web-latest
+          image: ghcr.io/isms-core-project/kubernetes-dashboard:dashboard-web-react-mui-latest
           imagePullPolicy: Always
           ports:
             - name: web

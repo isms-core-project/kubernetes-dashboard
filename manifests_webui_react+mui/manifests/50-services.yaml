@@ -84,7 +84,17 @@ spec:
 
 ---
 # ==============================================================================================================
-# MetalLB — Required for LoadBalancer services on bare-metal clusters
+# Kong proxy — NodePort (default, works on any cluster)
+#
+# Access the dashboard at http://<node-ip>:30080
+# Change nodePort values below if they conflict with existing services.
+#
+# ── MetalLB option (bare-metal LoadBalancer) ─────────────────────────────────
+# If you have MetalLB, replace type: NodePort with type: LoadBalancer, remove the
+# nodePort fields, and optionally pin an IP via the annotation:
+#
+#   annotations:
+#     metallb.io/loadBalancerIPs: "<YOUR-IP>"
 #
 # INSTALL MetalLB:
 #   MetalLB_RTAG=$(curl -s https://api.github.com/repos/metallb/metallb/releases/latest | grep tag_name | cut -d '"' -f 4 | sed 's/v//')
@@ -101,7 +111,7 @@ spec:
 #     namespace: metallb-system
 #   spec:
 #     addresses:
-#     - 10.0.0.60-10.0.0.89        # Adjust to your LAN range
+#     - 192.168.1.200-192.168.1.220  # Adjust to your LAN range
 #     autoAssign: true
 #   ---
 #   apiVersion: metallb.io/v1beta1
@@ -112,28 +122,20 @@ spec:
 #   spec:
 #     ipAddressPools:
 #     - production
-#     interfaces:
-#     - eno1                         # Lock to LAN interface (adjust if needed)
 #   EOF
-#
-# PIN a specific IP for this service: uncomment the annotation below and replace <YOUR-IP>
-#   Example: metallb.io/loadBalancerIPs: "10.0.0.60"
-#   Choose any free IP from your MetalLB address pool
 # ==============================================================================================================
 
-# Kong proxy — LoadBalancer entry point
+# Kong proxy — NodePort entry point
 apiVersion: v1
 kind: Service
 metadata:
   name: kubernetes-dashboard-kong-proxy
   namespace: kubernetes-dashboard
-#  annotations:
-#    metallb.io/loadBalancerIPs: "<YOUR-IP>"
   labels:
     app.kubernetes.io/part-of: kubernetes-dashboard
     app.kubernetes.io/component: kong
 spec:
-  type: LoadBalancer
+  type: NodePort
   selector:
     app.kubernetes.io/part-of: kubernetes-dashboard
     app.kubernetes.io/name: kubernetes-dashboard-kong
@@ -141,8 +143,10 @@ spec:
     - name: proxy
       port: 80
       targetPort: 8000
+      nodePort: 30080
       protocol: TCP
     - name: proxy-ssl
       port: 443
       targetPort: 8443
+      nodePort: 30443
       protocol: TCP

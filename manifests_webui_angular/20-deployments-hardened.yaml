@@ -1,0 +1,587 @@
+# ==============================================================================================================
+# 20-deployments-hardened.yaml — auth, api, web, metrics-scraper, kong
+# Hardened variant: adds health probes, fsGroup, priorityClassName, topologySpreadConstraints
+# Kong cannot have readOnlyRootFilesystem (writes internally) — all other pods are fully locked down
+# ==============================================================================================================
+
+# ── AUTH ──────────────────────────────────────────────────────────────────────
+
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: kubernetes-dashboard-auth
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/name: kubernetes-dashboard-auth
+    app.kubernetes.io/component: auth
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: kubernetes-dashboard
+      app.kubernetes.io/name: kubernetes-dashboard-auth
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: kubernetes-dashboard
+        app.kubernetes.io/name: kubernetes-dashboard-auth
+        app.kubernetes.io/component: auth
+    spec:
+      serviceAccountName: kubernetes-dashboard-auth
+      automountServiceAccountToken: true
+      priorityClassName: system-cluster-critical
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 2001
+        fsGroup: 2001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: kubernetes-dashboard-auth
+      containers:
+        - name: kubernetes-dashboard-auth
+          image: ghcr.io/isms-core-project/kubernetes-dashboard:dashboard-auth-latest
+          imagePullPolicy: Always
+          ports:
+            - name: auth
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: CSRF_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: kubernetes-dashboard-csrf
+                  key: private.key
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.cpu
+                  divisor: "1"
+            - name: GOMEMLIMIT
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.memory
+                  divisor: "1"
+          livenessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+            timeoutSeconds: 3
+          readinessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 3
+          volumeMounts:
+            - mountPath: /tmp
+              name: tmp-volume
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 2001
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 200Mi
+            limits:
+              cpu: 250m
+              memory: 400Mi
+      volumes:
+        - name: tmp-volume
+          emptyDir: {}
+
+# ── API ───────────────────────────────────────────────────────────────────────
+
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: kubernetes-dashboard-api
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/name: kubernetes-dashboard-api
+    app.kubernetes.io/component: api
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: kubernetes-dashboard
+      app.kubernetes.io/name: kubernetes-dashboard-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: kubernetes-dashboard
+        app.kubernetes.io/name: kubernetes-dashboard-api
+        app.kubernetes.io/component: api
+    spec:
+      serviceAccountName: kubernetes-dashboard-api
+      automountServiceAccountToken: true
+      priorityClassName: system-cluster-critical
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 2001
+        fsGroup: 2001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: kubernetes-dashboard-api
+      containers:
+        - name: kubernetes-dashboard-api
+          image: ghcr.io/isms-core-project/kubernetes-dashboard:dashboard-api-latest
+          imagePullPolicy: Always
+          args:
+            - --namespace=kubernetes-dashboard
+            - --metrics-scraper-service-name=kubernetes-dashboard-metrics-scraper
+            - --sidecar-host=http://kubernetes-dashboard-metrics-scraper:8000
+          ports:
+            - name: api
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: CSRF_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: kubernetes-dashboard-csrf
+                  key: private.key
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: kubernetes-dashboard-ai
+                  key: api-key
+                  optional: true
+            # ── VictoriaMetrics (optional) ────────────────────────────────────────────
+            # Set to enable historical metrics and sparklines. Remove (or leave blank)
+            # to keep the default SQLite-only behaviour with no UI change.
+            - name: VM_ENDPOINT
+              value: "http://kubernetes-dashboard-victoriametrics:8428"
+            # ── Prometheus (optional — coexists with VM_ENDPOINT) ─────────────────────
+            # If you run kube-prometheus-stack instead of (or alongside) VictoriaMetrics,
+            # uncomment and set to your Prometheus service URL. VM takes priority if both
+            # are configured. Typical kube-prometheus value:
+            # - name: PROMETHEUS_ENDPOINT
+            #   value: "http://prometheus-k8s.monitoring.svc:9090"
+            # ── Proxy (optional) ─────────────────────────────────────────────────────
+            # Required if your cluster has no direct outbound internet access.
+            # The AI assistant calls api.anthropic.com:443 — route it through your proxy.
+            # - name: HTTPS_PROXY
+            #   value: "http://proxy.example.com:3128"
+            # - name: NO_PROXY
+            #   value: "localhost,127.0.0.1,10.0.0.0/8,.cluster.local"
+            # ── Notifications (optional) ──────────────────────────────────────────────
+            - name: GRAPH_TENANT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: kubernetes-dashboard-notifications
+                  key: GRAPH_TENANT_ID
+                  optional: true
+            - name: GRAPH_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: kubernetes-dashboard-notifications
+                  key: GRAPH_CLIENT_ID
+                  optional: true
+            - name: GRAPH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: kubernetes-dashboard-notifications
+                  key: GRAPH_CLIENT_SECRET
+                  optional: true
+            - name: MAIL_FROM
+              valueFrom:
+                secretKeyRef:
+                  name: kubernetes-dashboard-notifications
+                  key: MAIL_FROM
+                  optional: true
+            - name: MAIL_FROM_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: kubernetes-dashboard-notifications
+                  key: MAIL_FROM_NAME
+                  optional: true
+            - name: MAIL_TO
+              valueFrom:
+                secretKeyRef:
+                  name: kubernetes-dashboard-notifications
+                  key: MAIL_TO
+                  optional: true
+            - name: NOTIFY_INTERVAL_H
+              valueFrom:
+                secretKeyRef:
+                  name: kubernetes-dashboard-notifications
+                  key: NOTIFY_INTERVAL_H
+                  optional: true
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.cpu
+                  divisor: "1"
+            - name: GOMEMLIMIT
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.memory
+                  divisor: "1"
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            failureThreshold: 3
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5
+          volumeMounts:
+            - mountPath: /tmp
+              name: tmp-volume
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 2001
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 200Mi
+            limits:
+              cpu: 250m
+              memory: 400Mi
+      volumes:
+        - name: tmp-volume
+          emptyDir: {}
+
+# ── WEB ───────────────────────────────────────────────────────────────────────
+
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: kubernetes-dashboard-web
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/name: kubernetes-dashboard-web
+    app.kubernetes.io/component: web
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: kubernetes-dashboard
+      app.kubernetes.io/name: kubernetes-dashboard-web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: kubernetes-dashboard
+        app.kubernetes.io/name: kubernetes-dashboard-web
+        app.kubernetes.io/component: web
+    spec:
+      serviceAccountName: kubernetes-dashboard-web
+      automountServiceAccountToken: true
+      priorityClassName: system-cluster-critical
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: kubernetes-dashboard-web
+      containers:
+        - name: kubernetes-dashboard-web
+          image: ghcr.io/isms-core-project/kubernetes-dashboard:dashboard-web-angular-latest
+          imagePullPolicy: Always
+          ports:
+            - name: web
+              containerPort: 8000
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5
+          volumeMounts:
+            - mountPath: /tmp
+              name: tmp-volume
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 200Mi
+            limits:
+              cpu: 250m
+              memory: 400Mi
+      volumes:
+        - name: tmp-volume
+          emptyDir: {}
+
+# ── METRICS-SCRAPER ───────────────────────────────────────────────────────────
+
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: kubernetes-dashboard-metrics-scraper
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/name: kubernetes-dashboard-metrics-scraper
+    app.kubernetes.io/component: metrics-scraper
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: kubernetes-dashboard
+      app.kubernetes.io/name: kubernetes-dashboard-metrics-scraper
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: kubernetes-dashboard
+        app.kubernetes.io/name: kubernetes-dashboard-metrics-scraper
+        app.kubernetes.io/component: metrics-scraper
+    spec:
+      serviceAccountName: kubernetes-dashboard-metrics-scraper
+      automountServiceAccountToken: true
+      priorityClassName: system-cluster-critical
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 2001
+        fsGroup: 2001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: kubernetes-dashboard-metrics-scraper
+      containers:
+        - name: kubernetes-dashboard-metrics-scraper
+          image: ghcr.io/isms-core-project/kubernetes-dashboard:dashboard-metrics-scraper-latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+              protocol: TCP
+          env:
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.cpu
+                  divisor: "1"
+            - name: GOMEMLIMIT
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.memory
+                  divisor: "1"
+            # ── VictoriaMetrics (optional) ────────────────────────────────────────────
+            # Must match the value set on the api container above.
+            - name: VM_ENDPOINT
+              value: "http://kubernetes-dashboard-victoriametrics:8428"
+          livenessProbe:
+            httpGet:
+              scheme: HTTP
+              path: /
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+            timeoutSeconds: 30
+          readinessProbe:
+            httpGet:
+              scheme: HTTP
+              path: /
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5
+          volumeMounts:
+            - mountPath: /tmp
+              name: tmp-volume
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 2001
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 200Mi
+            limits:
+              cpu: 250m
+              memory: 400Mi
+      volumes:
+        - name: tmp-volume
+          emptyDir: {}
+
+# ── KONG (API GATEWAY) ────────────────────────────────────────────────────────
+# Note: readOnlyRootFilesystem cannot be set — Kong writes internally (lua cache, temp files)
+
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: kubernetes-dashboard-kong
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/name: kubernetes-dashboard-kong
+    app.kubernetes.io/component: kong
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: kubernetes-dashboard
+      app.kubernetes.io/name: kubernetes-dashboard-kong
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: kubernetes-dashboard
+        app.kubernetes.io/name: kubernetes-dashboard-kong
+        app.kubernetes.io/component: kong
+    spec:
+      serviceAccountName: kubernetes-dashboard-kong
+      automountServiceAccountToken: false
+      priorityClassName: system-cluster-critical
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: kubernetes-dashboard-kong
+      containers:
+        - name: kong
+          image: kong:3.6
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: KONG_DATABASE
+              value: "off"
+            - name: KONG_DECLARATIVE_CONFIG
+              value: /kong_dbless/kong.yml
+            - name: KONG_DNS_ORDER
+              value: LAST,A,CNAME,AAAA,SRV
+            - name: KONG_PLUGINS
+              value: "off"
+            - name: KONG_NGINX_WORKER_PROCESSES
+              value: "1"
+            - name: KONG_PROXY_ACCESS_LOG
+              value: /dev/stdout
+            - name: KONG_PROXY_ERROR_LOG
+              value: /dev/stderr
+            - name: KONG_ADMIN_ACCESS_LOG
+              value: /dev/stdout
+            - name: KONG_ADMIN_ERROR_LOG
+              value: /dev/stderr
+            - name: KONG_ADMIN_LISTEN
+              value: "127.0.0.1:8001"
+            - name: KONG_PROXY_LISTEN
+              value: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
+          ports:
+            - name: proxy
+              containerPort: 8000
+              protocol: TCP
+            - name: proxy-ssl
+              containerPort: 8443
+              protocol: TCP
+          volumeMounts:
+            - name: kong-dbless-config
+              mountPath: /kong_dbless
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /status
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+            timeoutSeconds: 5
+      volumes:
+        - name: kong-dbless-config
+          configMap:
+            name: kong-dbless-config

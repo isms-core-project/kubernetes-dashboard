@@ -1,0 +1,132 @@
+---
+# ── ServiceAccount — no ClusterRole needed (VM is a passive receiver of remote_write) ──
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubernetes-dashboard-victoriametrics
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/component: victoriametrics
+
+---
+# VictoriaMetrics — optional single-node time-series database
+# Deploy only when you want historical metrics and sparklines in the dashboard.
+# If this is not deployed, the dashboard falls back to the existing SQLite path
+# with no UI change — just don't set VM_ENDPOINT in 20-deployments-hardened.yaml.
+#
+# For the Network Traffic graph, also deploy 25-alloy.yaml (can be in either order).
+#
+# Apply:
+#   kubectl apply -f 26-victoriametrics.yaml
+#   kubectl rollout status statefulset/kubernetes-dashboard-victoriametrics -n kubernetes-dashboard
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kubernetes-dashboard-victoriametrics
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/name: kubernetes-dashboard-victoriametrics
+    app.kubernetes.io/part-of: kubernetes-dashboard
+spec:
+  serviceName: kubernetes-dashboard-victoriametrics
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubernetes-dashboard-victoriametrics
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kubernetes-dashboard-victoriametrics
+        app.kubernetes.io/part-of: kubernetes-dashboard
+    spec:
+      serviceAccountName: kubernetes-dashboard-victoriametrics
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 2001
+        fsGroup: 2001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: victoriametrics
+          image: victoriametrics/victoria-metrics:v1.115.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - -storageDataPath=/storage
+            - -retentionPeriod=30d
+            - -httpListenAddr=:8428
+          ports:
+            - name: http
+              containerPort: 8428
+              protocol: TCP
+          env:
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.cpu
+                  divisor: "1"
+            - name: GOMEMLIMIT
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.memory
+                  divisor: "1"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: storage
+              mountPath: /storage
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: storage
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: ""   # set to your StorageClass (e.g. longhorn, standard, gp2)
+        resources:
+          requests:
+            storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubernetes-dashboard-victoriametrics
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/name: kubernetes-dashboard-victoriametrics
+    app.kubernetes.io/part-of: kubernetes-dashboard
+spec:
+  selector:
+    app.kubernetes.io/name: kubernetes-dashboard-victoriametrics
+  ports:
+    - name: http
+      port: 8428
+      targetPort: http
+      protocol: TCP
+  type: ClusterIP

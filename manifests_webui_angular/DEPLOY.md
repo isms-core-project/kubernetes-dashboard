@@ -56,7 +56,7 @@ probes on all containers. Kong cannot have `readOnlyRootFilesystem` (writes lua 
 
 | Pod | Ingress | Egress |
 |---|---|---|
-| kong | anywhere (LoadBalancer) | auth, api, web pods + DNS |
+| kong | anywhere (NodePort 30080/30443) | auth, api, web pods + DNS |
 | web | kong only | DNS only |
 | auth | kong only | k8s API server (443/6443) + DNS |
 | api | kong only | metrics-scraper + victoriametrics (8428) + k8s API server (443/6443) + DNS |
@@ -192,9 +192,14 @@ With Alloy: 5 dashboard pods + one alloy pod per node.
 
 ## Access
 
-Dashboard is at `http://<YOUR-IP>` — MetalLB assigns the IP to the Kong proxy LoadBalancer.
+Dashboard is at `http://<node-ip>:30080` — Kong NodePort is fixed at port 30080 (HTTP) and 30443 (HTTPS).
 The landing page is `/overview` — a PRTG-style cluster health summary with stat tiles, donut charts,
 and (when VictoriaMetrics + Alloy are deployed) a live network traffic graph.
+
+**MetalLB (optional):** If you have MetalLB and want a clean IP instead of a NodePort, edit
+`50-services.yaml` — change `type: NodePort` to `type: LoadBalancer`, remove the `nodePort` fields,
+and optionally add `metallb.io/loadBalancerIPs: "<YOUR-IP>"` to the annotations. Full instructions
+are in the comments at the top of that file.
 
 ### Pages
 

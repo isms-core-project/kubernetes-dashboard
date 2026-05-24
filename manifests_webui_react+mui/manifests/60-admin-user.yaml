@@ -1,0 +1,38 @@
+# ==============================================================================================================
+# 60-admin-user.yaml — Admin service account with cluster-admin for dashboard login
+#
+# Get the login token after applying:
+#   kubectl get secret admin-user -n kubernetes-dashboard \
+#     -o jsonpath='{.data.token}' | base64 -d
+# ==============================================================================================================
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: admin-user
+  namespace: kubernetes-dashboard
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: admin-user
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: admin-user
+    namespace: kubernetes-dashboard
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: admin-user
+  namespace: kubernetes-dashboard
+  annotations:
+    kubernetes.io/service-account.name: admin-user
+type: kubernetes.io/service-account-token

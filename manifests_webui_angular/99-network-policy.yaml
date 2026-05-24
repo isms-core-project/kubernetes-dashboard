@@ -5,7 +5,7 @@
 #
 # Traffic flows locked down:
 #   external → kong (LoadBalancer)
-#   kong     → auth (8000), api (8000), web (8080)
+#   kong     → auth (8000), api (8000), web (8000)
 #   api      → metrics-scraper (8000)
 #   api      → k8s API server (443/6443) + Anthropic external (443)
 #   auth     → k8s API server (443/6443)
@@ -84,10 +84,10 @@ spec:
             matchLabels:
               app.kubernetes.io/name: kubernetes-dashboard-web
       ports:
-        - port: 8080
+        - port: 8000
           protocol: TCP
 
-# ── Web — ingress from Kong only, no egress required (static nginx) ──────────
+# ── Web — ingress from Kong only, no egress required (Go binary, scratch image) ──────────
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -106,7 +106,7 @@ spec:
             matchLabels:
               app.kubernetes.io/name: kubernetes-dashboard-kong
       ports:
-        - port: 8080
+        - port: 8000
           protocol: TCP
 
 # ── Auth — ingress from Kong, egress to Kubernetes API server ─────────────────
@@ -258,9 +258,10 @@ spec:
     # Alloy DaemonSet pushes node metrics (cpu, memory, network, disk) via remote_write.
     # Alloy runs with hostNetwork: true so traffic originates from node IPs, not pod IPs —
     # podSelector won't match; ipBlock covers the node network instead.
+    # Adjust the CIDR to match your node network (e.g. 192.168.1.0/24 for a typical homelab).
     - from:
         - ipBlock:
-            cidr: 10.0.0.0/24
+            cidr: 10.0.0.0/8
       ports:
         - port: 8428
           protocol: TCP
