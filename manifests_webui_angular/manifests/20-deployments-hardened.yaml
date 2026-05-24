@@ -525,6 +525,8 @@ spec:
           image: kong:3.9.1
           imagePullPolicy: IfNotPresent
           env:
+            - name: KONG_PREFIX
+              value: /tmp/kong
             - name: KONG_DATABASE
               value: "off"
             - name: KONG_DECLARATIVE_CONFIG
@@ -558,6 +560,8 @@ spec:
             - name: kong-dbless-config
               mountPath: /kong_dbless
               readOnly: true
+            - name: kong-prefix
+              mountPath: /tmp/kong
           resources:
             requests:
               cpu: 100m
@@ -585,3 +589,5 @@ spec:
         - name: kong-dbless-config
           configMap:
             name: kong-dbless-config
+        - name: kong-prefix
+          emptyDir: {}
