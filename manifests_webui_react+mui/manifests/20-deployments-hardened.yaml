@@ -550,7 +550,7 @@ spec:
             - name: KONG_DNS_ORDER
               value: LAST,A,CNAME,AAAA,SRV
             - name: KONG_PLUGINS
-              value: "off"
+              value: "response-transformer"
             - name: KONG_NGINX_WORKER_PROCESSES
               value: "1"
             - name: KONG_PROXY_ACCESS_LOG

@@ -68,3 +68,9 @@ data:
             paths:
               - /
             strip_path: false
+    plugins:
+      - name: response-transformer
+        config:
+          add:
+            headers:
+              - "Strict-Transport-Security: max-age=31536000"

@@ -6,32 +6,28 @@ The original [kubernetes/dashboard](https://github.com/kubernetes-retired/dashbo
 
 We took up the challenge.
 
-The Go API backend was solid and worth keeping. The Angular WebUI was Angular 16 — already one major version behind at archive time, and drifting further every month. Rather than let it rot, we forked it and got to work.
+The Go API backend was solid and worth keeping. The Angular WebUI was Angular 16 — already one major version behind at archive time, and drifting further every month. Rather than let it rot, we forked it and upgraded it the right way: stepping through every Angular major version one at a time — 16 → 17 → 18 → 19 → 20 → 21 — fixing all 44 catalogued breaking changes along the way. See [ANGULAR-UPGRADE.md](ANGULAR-UPGRADE.md) for the full story.
 
-**First attempt:** jump the Angular WebUI straight from v16 to v21. That failed — four compounding blockers mean a direct jump is impossible (abandoned flex-layout, deleted SCSS entrypoints, a builder that no longer exists). So we built a **React + Material UI** WebUI from scratch on the same Go backend, shipping something production-ready while we worked out the proper incremental upgrade path.
-
-**Second attempt:** step through every Angular major version one at a time — 16 → 17 → 18 → 19 → 20 → 21 — fixing all 44 catalogued breaking changes along the way. That worked. See [ANGULAR-UPGRADE.md](ANGULAR-UPGRADE.md) for the full story.
+During the upgrade we also built a **React + Material UI** WebUI from scratch on the same Go backend, shipping a production-ready alternative for teams that prefer React.
 
 The result is two production-grade WebUI flavors on a shared Go backend, both actively maintained.
-
-Two WebUI flavors — deploy the one that fits your stack.
 
 ---
 
 ## Flavors
 
-| | React + Material UI | Angular + Angular Material |
+| | Angular + Angular Material | React + Material UI |
 |---|---|---|
-| **Framework** | React 19, MUI v6 | Angular 21, Angular Material |
+| **Framework** | Angular 21, Angular Material | React 19, MUI v6 |
 | **Namespace** | `kubernetes-dashboard` | `kubernetes-dashboard` |
-| **Web image** | `dashboard-web-react-mui-latest` | `dashboard-web-angular-latest` |
-| **Manifests** | `manifests_webui_react+mui/manifests/` | `manifests_webui_angular/manifests/` |
-| **Deploy guide** | [DEPLOY-REACT.md](DEPLOY-REACT.md) | [DEPLOY-ANGULAR.md](DEPLOY-ANGULAR.md) |
+| **Web image** | `dashboard-web-angular-latest` | `dashboard-web-react-mui-latest` |
+| **Manifests** | `manifests_webui_angular/manifests/` | `manifests_webui_react+mui/manifests/` |
+| **Deploy guide** | [DEPLOY-ANGULAR.md](DEPLOY-ANGULAR.md) | [DEPLOY-REACT.md](DEPLOY-REACT.md) |
 | **Cert Manager UI** | ✅ | ✅ |
 | **MetalLB UI** | ✅ | ✅ |
 | **Pod Security / Network** | ✅ | ✅ |
 
-Both flavors use the same Go images: `dashboard-api`, `dashboard-auth`, `dashboard-metrics-scraper`, and Kong 3.6. All images pull from `ghcr.io/isms-core-project/kubernetes-dashboard`.
+Both flavors use the same Go images: `dashboard-api`, `dashboard-auth`, `dashboard-metrics-scraper`, and Kong 3.9.1. All images pull from `ghcr.io/isms-core-project/kubernetes-dashboard`.
 
 ---
 
@@ -49,87 +45,10 @@ Both flavors use the same Go images: `dashboard-api`, `dashboard-auth`, `dashboa
 - **Event Timeline** — live event feed with time-bucket grouping and warning highlight
 - **Registry Manager** — docker pull secrets cross-referenced with pod `imagePullSecrets`
 - **Historical Metrics** — pod CPU/memory sparklines with 1h/6h/24h/7d selector (VictoriaMetrics or Prometheus)
-- **Cluster Shell** — interactive xterm.js terminal exec'd into the dashboard pod; kubectl runs as the user's JWT *(React+MUI only)*
-- **AI Assistant** — Claude Sonnet via SSE streaming; pod spec and events auto-injected from detail pages *(React+MUI only)*
 - **Event Alerts** — real-time email on CrashLoop/OOM/ImagePullBackOff/NodeNotReady; configurable per type
 - **Pod Logs** — live streaming, timestamps, severity filter, text filter, download
-
----
-
-## Screenshots — React + Material UI
-
-### Sign In
-![Sign in](screenshots_webui_react+mui/k8s_dashboard_logon.png)
-
-### Overview
-Stat tiles, donut charts, and live Network Traffic graph.
-
-![Overview](screenshots_webui_react+mui/k8s_dashboard_overview.png)
-
-### Workloads
-Full workload list with status, restart count, and inline actions.
-
-![Workloads](screenshots_webui_react+mui/k8s_dashboard_home.png)
-
-### Cluster Map
-Namespace-scoped topology with Error/Warning filter and zoom.
-
-![Cluster map](screenshots_webui_react+mui/k8s_dashboard_map.png)
-
-### Pods
-Live CPU/Memory sparklines, restart count, node assignment, inline actions.
-
-![Pods](screenshots_webui_react+mui/k8s_dashboard_pods.png)
-
-### Policy Audit
-Polaris security scoring per workload — expandable check details.
-
-![Policy audit](screenshots_webui_react+mui/k8s_dashboard_policy_audit.png)
-
-### Resource Efficiency
-CPU/memory request vs limit vs actual — verdict chips, CSV export.
-
-![Resource efficiency](screenshots_webui_react+mui/k8s_dashboard_resource_efficiency.png)
-
-### Certificate Tracker
-TLS secrets: common name, SANs, expiry, status badges.
-
-![Certificate tracker](screenshots_webui_react+mui/k8s_dashboard_cert_tracker.png)
-
-### Event Timeline
-Live event feed with time-bucket grouping and warning highlight.
-
-![Event timeline](screenshots_webui_react+mui/k8s_dashboard_events_timeline.png)
-
-### Application Projects
-Per-namespace project cards with pod health and resource totals.
-
-![Projects](screenshots_webui_react+mui/k8s_dashboard_projects.png)
-
-### Kubescape Security
-Compliance scores and CVE findings — auto-detected when Kubescape Operator is running.
-
-![Kubescape](screenshots_webui_react+mui/k8s_dashboard_kubescape.png)
-
-### VictoriaMetrics Sparklines
-Pod CPU/memory sparklines with 1h/6h/24h/7d selector.
-
-![VictoriaMetrics](screenshots_webui_react+mui/k8s_dashboard_victoriametrics.png)
-
-### PVC Storage Usage
-Live usage bars from the kubelet stats API.
-
-![PVC storage](screenshots_webui_react+mui/k8s_dashboard_pvc.png)
-
-### RBAC Viewer
-All role bindings with resolved rules and wildcard detection.
-
-![RBAC viewer](screenshots_webui_react+mui/k8s_dashboard_rbac_viewer.png)
-
-### Cluster Shell
-Full interactive bash terminal — kubectl runs as the logged-in user.
-
-![Cluster Shell](screenshots_webui_react+mui/k8s_dashboard_shell.png)
+- **Cluster Shell** — interactive xterm.js terminal exec'd into the dashboard pod; kubectl runs as the user's JWT *(React+MUI only)*
+- **AI Assistant** — Claude Sonnet via SSE streaming; pod spec and events auto-injected from detail pages *(React+MUI only)*
 
 ---
 
@@ -230,13 +149,90 @@ Full interactive bash terminal.
 
 ---
 
+## Screenshots — React + Material UI
+
+### Sign In
+![Sign in](screenshots_webui_react+mui/k8s_dashboard_logon.png)
+
+### Overview
+Stat tiles, donut charts, and live Network Traffic graph.
+
+![Overview](screenshots_webui_react+mui/k8s_dashboard_overview.png)
+
+### Workloads
+Full workload list with status, restart count, and inline actions.
+
+![Workloads](screenshots_webui_react+mui/k8s_dashboard_home.png)
+
+### Cluster Map
+Namespace-scoped topology with Error/Warning filter and zoom.
+
+![Cluster map](screenshots_webui_react+mui/k8s_dashboard_map.png)
+
+### Pods
+Live CPU/Memory sparklines, restart count, node assignment, inline actions.
+
+![Pods](screenshots_webui_react+mui/k8s_dashboard_pods.png)
+
+### Policy Audit
+Polaris security scoring per workload — expandable check details.
+
+![Policy audit](screenshots_webui_react+mui/k8s_dashboard_policy_audit.png)
+
+### Resource Efficiency
+CPU/memory request vs limit vs actual — verdict chips, CSV export.
+
+![Resource efficiency](screenshots_webui_react+mui/k8s_dashboard_resource_efficiency.png)
+
+### Certificate Tracker
+TLS secrets: common name, SANs, expiry, status badges.
+
+![Certificate tracker](screenshots_webui_react+mui/k8s_dashboard_cert_tracker.png)
+
+### Event Timeline
+Live event feed with time-bucket grouping and warning highlight.
+
+![Event timeline](screenshots_webui_react+mui/k8s_dashboard_events_timeline.png)
+
+### Application Projects
+Per-namespace project cards with pod health and resource totals.
+
+![Projects](screenshots_webui_react+mui/k8s_dashboard_projects.png)
+
+### Kubescape Security
+Compliance scores and CVE findings — auto-detected when Kubescape Operator is running.
+
+![Kubescape](screenshots_webui_react+mui/k8s_dashboard_kubescape.png)
+
+### VictoriaMetrics Sparklines
+Pod CPU/memory sparklines with 1h/6h/24h/7d selector.
+
+![VictoriaMetrics](screenshots_webui_react+mui/k8s_dashboard_victoriametrics.png)
+
+### PVC Storage Usage
+Live usage bars from the kubelet stats API.
+
+![PVC storage](screenshots_webui_react+mui/k8s_dashboard_pvc.png)
+
+### RBAC Viewer
+All role bindings with resolved rules and wildcard detection.
+
+![RBAC viewer](screenshots_webui_react+mui/k8s_dashboard_rbac_viewer.png)
+
+### Cluster Shell
+Full interactive bash terminal — kubectl runs as the logged-in user.
+
+![Cluster Shell](screenshots_webui_react+mui/k8s_dashboard_shell.png)
+
+---
+
 ## Architecture
 
 Five pods in the dashboard namespace, fronted by a Kong API gateway:
 
 ```
 Browser
-  └── Kong 3.6 (DBless, NodePort :30080)
+  └── Kong 3.9.1 (DBless, NodePort :30080)
         ├── /api/v1/login, /csrftoken, /me   → dashboard-auth
         ├── /api/*                            → dashboard-api
         │     └── sidecar: dashboard-metrics-scraper
@@ -257,8 +253,8 @@ Optional add-ons (all in the same namespace):
 
 See the flavor-specific guide for the full runbook:
 
-- **React + Material UI:** [DEPLOY-REACT.md](DEPLOY-REACT.md)
 - **Angular + Angular Material:** [DEPLOY-ANGULAR.md](DEPLOY-ANGULAR.md)
+- **React + Material UI:** [DEPLOY-REACT.md](DEPLOY-REACT.md)
 
 ---
 
