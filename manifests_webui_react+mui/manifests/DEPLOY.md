@@ -158,27 +158,6 @@ After ~60 seconds of first push, the Overview page Zone 3 (Network Traffic) auto
 physical NICs via VictoriaMetrics label values and shows live rx/tx bytes/s with a 1h/6h/24h/7d
 range toggle. Virtual interfaces are filtered out automatically.
 
-### Upgrading from node-exporter
-
-If you previously deployed `25-node-exporter.yaml`, clean up the old cluster-scoped resources:
-
-```bash
-kubectl delete daemonset kubernetes-dashboard-node-exporter -n kubernetes-dashboard
-kubectl delete service kubernetes-dashboard-node-exporter -n kubernetes-dashboard
-kubectl delete configmap kubernetes-dashboard-vm-scrape -n kubernetes-dashboard
-kubectl delete clusterrole kubernetes-dashboard-vm-sd
-kubectl delete clusterrolebinding kubernetes-dashboard-vm-sd
-kubectl delete serviceaccount kubernetes-dashboard-vm-sd -n kubernetes-dashboard
-```
-
-Then apply the new manifest and restart VictoriaMetrics to clear the old scrape config:
-
-```bash
-kubectl apply -f 25-alloy.yaml
-kubectl apply -f 26-victoriametrics.yaml   # picks up the updated StatefulSet spec
-kubectl rollout restart statefulset/kubernetes-dashboard-victoriametrics -n kubernetes-dashboard
-```
-
 ---
 
 ## Verify
