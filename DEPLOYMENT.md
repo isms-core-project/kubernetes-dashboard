@@ -15,7 +15,7 @@ metrics-server must be running in `kube-system` for CPU/memory current-usage dat
 K3s includes it by default. On native Kubernetes (kubeadm, Talos, etc.) apply it first:
 
 ```bash
-kubectl apply -f manifests/manifests/00-prereqs-metrics-server.yaml
+kubectl apply -f manifests/00-prereqs-metrics-server.yaml
 kubectl rollout status deployment/metrics-server -n kube-system
 ```
 
@@ -26,14 +26,14 @@ Safe to run on clusters that already have metrics-server — `kubectl apply` wil
 ## Deploy (Standard)
 
 ```bash
-kubectl apply -f manifests/manifests/00-namespace.yaml
-kubectl apply -f manifests/manifests/01-secrets.yaml
-kubectl apply -f manifests/manifests/02-configmap.yaml
-kubectl apply -f manifests/manifests/03-ai-secret.yaml       # Optional — AI assistant (see below)
-kubectl apply -f manifests/manifests/10-rbac.yaml
-kubectl apply -f manifests/manifests/20-deployments.yaml
-kubectl apply -f manifests/manifests/50-services.yaml
-kubectl apply -f manifests/manifests/60-admin-user.yaml
+kubectl apply -f manifests/00-namespace.yaml
+kubectl apply -f manifests/01-secrets.yaml
+kubectl apply -f manifests/02-configmap.yaml
+kubectl apply -f manifests/03-ai-secret.yaml       # Optional — AI assistant (see below)
+kubectl apply -f manifests/10-rbac.yaml
+kubectl apply -f manifests/20-deployments.yaml
+kubectl apply -f manifests/50-services.yaml
+kubectl apply -f manifests/60-admin-user.yaml
 ```
 
 ## Deploy (Hardened)
@@ -41,16 +41,16 @@ kubectl apply -f manifests/manifests/60-admin-user.yaml
 Use `20-deployments-hardened.yaml` and apply the NetworkPolicy last:
 
 ```bash
-kubectl apply -f manifests/manifests/00-namespace.yaml
-kubectl apply -f manifests/manifests/01-secrets.yaml
-kubectl apply -f manifests/manifests/02-configmap.yaml
-kubectl apply -f manifests/manifests/03-ai-secret.yaml            # Optional — AI assistant
-kubectl apply -f manifests/manifests/04-notifications-secret.yaml # Optional — email alerts
-kubectl apply -f manifests/manifests/10-rbac.yaml
-kubectl apply -f manifests/manifests/20-deployments-hardened.yaml
-kubectl apply -f manifests/manifests/50-services.yaml
-kubectl apply -f manifests/manifests/60-admin-user.yaml
-kubectl apply -f manifests/manifests/99-network-policy.yaml
+kubectl apply -f manifests/00-namespace.yaml
+kubectl apply -f manifests/01-secrets.yaml
+kubectl apply -f manifests/02-configmap.yaml
+kubectl apply -f manifests/03-ai-secret.yaml            # Optional — AI assistant
+kubectl apply -f manifests/04-notifications-secret.yaml # Optional — email alerts
+kubectl apply -f manifests/10-rbac.yaml
+kubectl apply -f manifests/20-deployments-hardened.yaml
+kubectl apply -f manifests/50-services.yaml
+kubectl apply -f manifests/60-admin-user.yaml
+kubectl apply -f manifests/99-network-policy.yaml
 ```
 
 Hardened variant adds: `readOnlyRootFilesystem`, `runAsNonRoot`, `drop ALL` capabilities,
@@ -100,8 +100,8 @@ When deployed, pod detail pages gain CPU and memory sparklines with a 1h/6h/24h/
 selector. The Cluster Overview page also shows a live Network Traffic graph.
 
 ```bash
-kubectl apply -f manifests/manifests/25-alloy.yaml            # Network Traffic graph
-kubectl apply -f manifests/manifests/26-victoriametrics.yaml  # sparklines + trend arrows
+kubectl apply -f manifests/25-alloy.yaml            # Network Traffic graph
+kubectl apply -f manifests/26-victoriametrics.yaml  # sparklines + trend arrows
 ```
 
 Or, if you already run **kube-prometheus-stack**, skip the VictoriaMetrics manifest and set
@@ -115,7 +115,7 @@ Alloy is the metrics push agent. It scrapes node network interface stats and pus
 VictoriaMetrics, enabling the live Network Traffic graph on the Cluster Overview page.
 
 ```bash
-kubectl apply -f manifests/manifests/25-alloy.yaml
+kubectl apply -f manifests/25-alloy.yaml
 ```
 
 Requires VictoriaMetrics to be running. The graph does not appear without both.

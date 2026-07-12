@@ -13,7 +13,7 @@ The Go API backend was solid and worth keeping. The Angular WebUI was Angular 16
 | **Framework** | Angular 21, Angular Material |
 | **Namespace** | `kubernetes-dashboard` |
 | **Web image** | `dashboard-web-angular-latest` |
-| **Manifests** | `manifests/manifests/` |
+| **Manifests** | `manifests/` |
 | **Deploy guide** | [DEPLOYMENT.md](DEPLOYMENT.md) |
 
 Uses the shared Go images: `dashboard-api`, `dashboard-auth`, `dashboard-metrics-scraper`, and Kong 3.9.1. All images pull from `ghcr.io/isms-core-project/kubernetes-dashboard`.
