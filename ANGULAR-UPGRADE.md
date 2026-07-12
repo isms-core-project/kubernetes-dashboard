@@ -173,8 +173,10 @@ these were all new pages:
 | **Gateway API** | GatewayClasses, Gateways, HTTPRoutes — auto-detected |
 | **Pod Security / Network Policies** | Pod Security Standards and NetworkPolicy visualisation |
 | **About page** | Build info, version, links |
+| **Cluster Shell** | Interactive xterm.js terminal exec'd into the dashboard pod; kubectl runs as the user's JWT |
+| **AI Assistant** | Claude Sonnet via SSE streaming; pod spec and events auto-injected from detail pages |
 
-The Angular flavor also retains features the React version does not have:
+The Angular flavor also has features of its own:
 
 - **Form-based resource creation** (deploy wizard)
 - **i18n** (9 locales: de, en, es, fr, ja, ko, zh-Hans, zh-Hant, zh-Hant-HK)
@@ -190,17 +192,6 @@ The Angular flavor also retains features the React version does not have:
   - `k8s-dash-react-mui` — React + Material UI flavor
   - `k8s-dash-angular` — this Angular flavor (under test)
 - All action paths tested: login, theme toggle, workloads list, pod detail, logs, exec terminal, settings sliders, create YAML, nav pin/unpin, all 14 new feature pages
-
----
-
-## What Was Not Upgraded
-
-**AI Chat Drawer** — implemented in React+MUI, not yet ported to Angular. The backend API
-(`POST /api/v1/ai/chat`) is shared and works. The Angular implementation would follow the same
-SSE streaming pattern.
-
-**Cluster Shell** — kubectl WebSocket terminal. React+MUI has a full implementation. Angular has
-standard pod exec (`xterm`) but not the cluster-level kubectl shell.
 
 ---
 
