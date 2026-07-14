@@ -96,16 +96,46 @@ kubectl get secret admin-user -n kubernetes-dashboard \
 
 ## VictoriaMetrics — Historical Metrics and Sparklines (Optional)
 
-When deployed, pod detail pages gain CPU and memory sparklines with a 1h/6h/24h/7d time range
-selector. The Cluster Overview page also shows a live Network Traffic graph.
+When enabled, pod detail pages gain CPU and memory sparklines with a 1h/6h/24h/7d time range
+selector, and the Cluster Overview page shows a live Network Traffic graph.
+
+This is a two-step process — deploying VictoriaMetrics alone does **not** turn the feature on.
+The `api` and `metrics-scraper` containers only start using it once you point them at it.
+
+**1. Deploy VictoriaMetrics (and Alloy, for the Network Traffic graph):**
 
 ```bash
 kubectl apply -f manifests/25-alloy.yaml            # Network Traffic graph
 kubectl apply -f manifests/26-victoriametrics.yaml  # sparklines + trend arrows
 ```
 
-Or, if you already run **kube-prometheus-stack**, skip the VictoriaMetrics manifest and set
-`PROMETHEUS_ENDPOINT` in `20-deployments-hardened.yaml` instead.
+**2. Uncomment `VM_ENDPOINT` in the manifest you deployed** (`20-deployments.yaml` or
+`20-deployments-hardened.yaml`) — it appears twice, once in the `api` container's env block and
+once in `metrics-scraper`'s, both commented out by default:
+
+```yaml
+# ── Metrics backend (optional) ────────────────────────────────────────────
+# Uncomment ONE (or both) to enable pod sparklines and the Network Traffic graph.
+# VictoriaMetrics — deploy 26-victoriametrics.yaml then uncomment:
+- name: VM_ENDPOINT
+  value: "http://kubernetes-dashboard-victoriametrics:8428"
+```
+
+Remove the `#` from both the `- name: VM_ENDPOINT` line and its `value:` line, in **both**
+containers — the value must match exactly between them.
+
+**3. Re-apply and restart:**
+
+```bash
+kubectl apply -f manifests/20-deployments.yaml   # or 20-deployments-hardened.yaml
+kubectl rollout restart deployment/kubernetes-dashboard-api -n kubernetes-dashboard
+kubectl rollout restart deployment/kubernetes-dashboard-metrics-scraper -n kubernetes-dashboard
+```
+
+Or, if you already run **kube-prometheus-stack**, skip `26-victoriametrics.yaml` and uncomment
+`PROMETHEUS_ENDPOINT` instead — same two-step process, but only in the `api` container's env
+block (`metrics-scraper` pushes its own metrics via VictoriaMetrics' push-import API, which
+Prometheus has no equivalent for, so it's `VM_ENDPOINT`-only there regardless).
 
 ---
 
