@@ -10,7 +10,7 @@ The Go API backend was solid and worth keeping. The Angular WebUI was Angular 16
 
 | | Angular + Angular Material |
 |---|---|
-| **Framework** | Angular 21, Angular Material |
+| **Framework** | Angular 21, Angular Material 21 (M3) |
 | **Namespace** | `kubernetes-dashboard` |
 | **Web image** | `dashboard-web-angular-latest` |
 | **Manifests** | `manifests/` |
