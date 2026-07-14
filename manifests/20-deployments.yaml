@@ -337,12 +337,12 @@ spec:
             - containerPort: 8000
               protocol: TCP
           env:
-            # ── Metrics backend (optional) ────────────────────────────────────────────
-            # Must match the value(s) set on the api container above.
+            # ── VictoriaMetrics (optional) ────────────────────────────────────────────
+            # Must match the value set on the api container above. PROMETHEUS_ENDPOINT
+            # is not read here — metrics-scraper pushes custom metrics via VM's
+            # push-import API, which Prometheus has no equivalent for.
             # - name: VM_ENDPOINT
             #   value: "http://kubernetes-dashboard-victoriametrics:8428"
-            # - name: PROMETHEUS_ENDPOINT
-            #   value: "http://prometheus-k8s.monitoring.svc:9090"
             - name: GOMAXPROCS
               valueFrom:
                 resourceFieldRef:
