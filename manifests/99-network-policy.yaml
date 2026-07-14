@@ -87,7 +87,7 @@ spec:
         - port: 8000
           protocol: TCP
 
-# ── Web — ingress from Kong only, no egress required (Go binary, scratch image) ──────────
+# ── Web — ingress from Kong, egress to Kubernetes API server (settings/system-banner ConfigMaps) ──
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -100,6 +100,7 @@ spec:
       app.kubernetes.io/name: kubernetes-dashboard-web
   policyTypes:
     - Ingress
+    - Egress
   ingress:
     - from:
         - podSelector:
@@ -107,6 +108,15 @@ spec:
               app.kubernetes.io/name: kubernetes-dashboard-kong
       ports:
         - port: 8000
+          protocol: TCP
+  egress:
+    # Kubernetes API server — port 443 (ClusterIP service) and 6443 (direct/VIP).
+    # pkg/settings/manager.go reads/writes the settings ConfigMap directly via client-go;
+    # this is not a proxy-only static file server.
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
           protocol: TCP
 
 # ── Auth — ingress from Kong, egress to Kubernetes API server ─────────────────
