@@ -1,7 +1,7 @@
 # Angular WebUI — v16 → v21 Upgrade Notes
 
 This document covers what it took to upgrade the Angular WebUI from v16 to v21 and extend it
-with all the features from the React+MUI flavor. It exists so that maintainers and contributors
+with substantial new operational features. It exists so that maintainers and contributors
 understand why the codebase looks the way it does and can repeat (or extend) the work.
 
 ---
@@ -153,9 +153,8 @@ charts with no error:
 
 ## Features Added Post-Upgrade
 
-After the upgrade reached Angular 21, all features from the React+MUI flavor were integrated
-into the Angular WebUI. The original Angular codebase had core Kubernetes resources coverage;
-these were all new pages:
+After the upgrade reached Angular 21, the dashboard was extended with substantial new
+operational features on top of the original core Kubernetes resource coverage:
 
 | Feature | Description |
 |---|---|
@@ -187,10 +186,9 @@ The Angular flavor also has features of its own:
 
 - 5 QA rounds before the upgrade was considered stable
 - 5-stage regression analysis covering: runtime correctness, visual regressions, memory leaks, feature gaps, performance
-- Real-cluster smoke test against a K3s cluster with all three flavors running simultaneously in separate namespaces:
-  - `k8s-dash-legacy` — original Helm chart installation
-  - `k8s-dash-react-mui` — React + Material UI flavor
-  - `k8s-dash-angular` — this Angular flavor (under test)
+- Real-cluster smoke test against a K3s cluster running the original Helm chart installation
+  (`k8s-dash-legacy`) and this upgraded Angular flavor (`k8s-dash-angular`) side by side, for
+  direct comparison against the original.
 - All action paths tested: login, theme toggle, workloads list, pod detail, logs, exec terminal, settings sliders, create YAML, nav pin/unpin, all 14 new feature pages
 
 ---
