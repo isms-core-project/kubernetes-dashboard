@@ -26,6 +26,7 @@ Uses the shared Go images: `dashboard-api`, `dashboard-auth`, `dashboard-metrics
 - **Workloads** — full list + detail for Deployments, DaemonSets, StatefulSets, Jobs, Cron Jobs, Replica Sets
 - **Workload Actions** — edit YAML, restart, scale, rollback, pause/resume, exec shell — all RBAC-aware
 - **Cluster Map** — namespace-scoped topology view with health filter and zoom
+- **Topology** — force-directed dependency graph of Pods, ReplicaSets, Deployments, StatefulSets, DaemonSets, Services, and Ingresses; colour-coded by kind and health, searchable, click-through to any resource's detail page
 - **Application Projects** — per-namespace cards with pod health and resource totals
 - **Policy Audit** — Polaris-native security scoring (0–100) per workload
 - **Resource Efficiency** — Goldilocks-style CPU/memory request vs limit vs actual; trend arrows via VictoriaMetrics
@@ -60,6 +61,11 @@ Full workload list with status, restart count, and inline actions.
 Namespace-scoped topology with health filter and zoom.
 
 ![Cluster map](screenshots/k8s_dashboard_map.png)
+
+### Topology
+Force-directed dependency graph — ownership and Service/Ingress edges, colour-coded by kind and health.
+
+![Topology](screenshots/k8s_dashboard_topology.png)
 
 ### Pods
 Live CPU/Memory sparklines, restart count, node assignment.
