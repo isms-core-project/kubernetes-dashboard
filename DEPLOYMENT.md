@@ -210,6 +210,47 @@ cluster — no configuration required:
 | Kubescape | `spdx.softwarecomposition.kubescape.io` | Kubescape (compliance scores, CVE findings) |
 | Gateway API | `gateway.networking.k8s.io` | Gateway API (GatewayClasses, Gateways, HTTPRoutes) |
 
+### Installing Kubescape correctly
+
+The upstream `kubescape-operator` Helm chart has a real bug: its `kubescape` container
+hardcodes `readOnlyRootFilesystem: true` with **no values.yaml override**, combined with a
+`subPath` mount that pins its config directory to a single file instead of a real writable
+directory. Together these make the scan engine's own internal "generate account ID" step
+fail with `chmod: operation not permitted` on every scan — the scan computes a complete,
+correct report and then silently discards it before syncing to the CRDs this dashboard
+reads. Every workload shows `Passed: 0 / Failed: 0 / Score: 0` even though nothing about
+the scan logic itself is broken. Full writeup: [kubernetes-dashboard.com/blog/kubescape-three-bugs-not-one](https://kubernetes-dashboard.com/blog/kubescape-three-bugs-not-one/).
+
+**Option A — static manifest (recommended).** A pre-patched snapshot of the chart,
+reviewable line by line, no live Helm dependency:
+
+```bash
+kubectl apply -f manifests/30-kubescape.yaml
+```
+
+**Option B — Helm, with the required patch.** Works, but the patch below must be re-applied
+after every `helm upgrade` — the chart has no values.yaml key to make it permanent, so it's
+easy to silently regress back to zero scores:
+
+```bash
+helm repo add kubescape https://kubescape.github.io/helm-charts/ && \
+helm repo update && \
+helm upgrade --install kubescape kubescape/kubescape-operator \
+  -n kubescape --create-namespace \
+  --set clusterName=$(kubectl config current-context) \
+  --set capabilities.relevancy=enable \
+  --set capabilities.networkPolicyService=enable
+
+# Required after every install/upgrade above — do not skip:
+kubectl patch deployment kubescape -n kubescape --type='json' \
+  -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/securityContext/readOnlyRootFilesystem", "value": false}]'
+```
+
+Kubescape's scan data lives on a real PersistentVolumeClaim (Longhorn or similar), not just
+in the CRDs — check its reclaim policy and consider annotating the PVC
+`helm.sh/resource-policy: keep` before ever uninstalling, so accumulated scan history
+survives.
+
 ---
 
 ## Tear Down
