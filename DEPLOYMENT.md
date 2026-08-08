@@ -213,24 +213,18 @@ cluster — no configuration required:
 ### Installing Kubescape correctly
 
 The upstream `kubescape-operator` Helm chart has a real bug: its `kubescape` container
-hardcodes `readOnlyRootFilesystem: true` with **no values.yaml override**, combined with a
-`subPath` mount that pins its config directory to a single file instead of a real writable
-directory. Together these make the scan engine's own internal "generate account ID" step
-fail with `chmod: operation not permitted` on every scan — the scan computes a complete,
-correct report and then silently discards it before syncing to the CRDs this dashboard
-reads. Every workload shows `Passed: 0 / Failed: 0 / Score: 0` even though nothing about
-the scan logic itself is broken. Full writeup: [kubernetes-dashboard.com/blog/kubescape-three-bugs-not-one](https://kubernetes-dashboard.com/blog/kubescape-three-bugs-not-one/).
+hardcodes `readOnlyRootFilesystem: true` with **no values.yaml override**. This makes the
+scan engine's own internal "generate account ID" step fail with `chmod: operation not
+permitted` on every scan, and every workload shows `Passed: 0 / Failed: 0 / Score: 0` on
+the dashboard's Security page as a result.
 
-**Option A — static manifest (recommended).** A pre-patched snapshot of the chart,
-reviewable line by line, no live Helm dependency:
-
-```bash
-kubectl apply -f manifests/30-kubescape.yaml
-```
-
-**Option B — Helm, with the required patch.** Works, but the patch below must be re-applied
-after every `helm upgrade` — the chart has no values.yaml key to make it permanent, so it's
-easy to silently regress back to zero scores:
+Setting `readOnlyRootFilesystem: false` on that one container (patch below) has resolved
+this in testing, but **the fix is not yet fully confirmed** — it worked once against an
+already-running deployment, then the identical symptom reappeared on a from-scratch
+reinstall even with the same patch applied, so there may be more to this than a single
+`securityContext` field. Treat the patch as the best known mitigation, not a guaranteed
+fix, until this is verified more thoroughly. The chart has no values.yaml key to make it
+permanent even once it is confirmed, so it must be re-applied after every `helm upgrade`:
 
 ```bash
 helm repo add kubescape https://kubescape.github.io/helm-charts/ && \
@@ -248,8 +242,12 @@ kubectl patch deployment kubescape -n kubescape --type='json' \
 
 Kubescape's scan data lives on a real PersistentVolumeClaim (Longhorn or similar), not just
 in the CRDs — check its reclaim policy and consider annotating the PVC
-`helm.sh/resource-policy: keep` before ever uninstalling, so accumulated scan history
-survives.
+`helm.sh/resource-policy: keep` before ever uninstalling. That annotation only protects
+against `helm uninstall`'s own resource pruning — a plain `kubectl delete namespace`
+deletes the PVC regardless of the annotation. In practice this PVC only holds the *current*
+scan snapshot (Kubescape overwrites in place rather than keeping history), so losing it
+just means the Security page is empty until the next scan completes, not a lost audit
+trail.
 
 ---
 
