@@ -1,0 +1,4136 @@
+---
+# =============================================================================
+# 30-kubescape.yaml — Kubescape security scanner (Policy Audit, RBAC wildcard
+# detection, CVE findings — powers the dashboard's auto-detected Security page)
+#
+# Optional. If not deployed, the dashboard's Security nav item simply doesn't
+# appear (detection-gated, see auto-detected-extensions blog post).
+#
+# Generated once from the upstream Helm chart — kubescape doesn't ship a plain
+# manifest distribution, only Helm (kubescape/kubescape-operator, chart
+# 1.40.3). This file is a static `helm template` snapshot with one
+# manual patch applied (see below), so it can be applied with plain
+# `kubectl apply`, versioned in this repo, and reviewed line-by-line — no
+# live Helm dependency needed after this point.
+#
+# Apply:
+#   kubectl apply -f 30-kubescape.yaml
+#
+# Regenerate after a chart upgrade (re-apply the same patch afterwards):
+#   helm repo add kubescape https://kubescape.github.io/helm-charts/
+#   helm repo update kubescape
+#   helm template kubescape kubescape/kubescape-operator --include-crds \
+#     --namespace kubescape \
+#     --set clusterName=$(kubectl config current-context) \
+#     --set capabilities.relevancy=enable \
+#     --set capabilities.networkPolicyService=enable > 30-kubescape.yaml
+#
+# ── The patch (search this file for "patched:") ─────────────────────────────
+# The kubescape Deployment hardcodes readOnlyRootFilesystem: true with no
+# values.yaml override hook, combined with a subPath mount that pins
+# /home/nonroot/.kubescape to a single file instead of a real directory.
+# Together these make the scan engine's own "generate account ID" step fail
+# with "chmod ...: operation not permitted" on every single scan — the scan
+# computes real results in memory and then discards them, so the dashboard's
+# Security page shows Passed=0/Failed=0/Score=0 for every resource forever,
+# even though nothing is actually broken about the scan itself. Confirmed live
+# 2026-08-08: with readOnlyRootFilesystem set to false for this one container,
+# scans complete and write real per-control results. Do not "fix" this back to
+# true without re-verifying the chmod failure is actually resolved upstream.
+# =============================================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubescape
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+---
+# Source: kubescape-operator/crds/cluster-security-exception.crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: clustersecurityexceptions.kubescape.io
+spec:
+  group: kubescape.io
+  names:
+    plural: clustersecurityexceptions
+    singular: clustersecurityexception
+    kind: ClusterSecurityException
+    shortNames:
+      - cse
+  scope: Cluster
+  versions:
+    - name: v1beta1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: ["spec"]
+          properties:
+            spec:
+              type: object
+              x-kubernetes-validations:
+                # expiresAt is not validated as future-dated: CRD CEL has no now(); expiry is enforced at scan time.
+                - rule: "(has(self.vulnerabilities) && size(self.vulnerabilities) > 0) || (has(self.posture) && size(self.posture) > 0)"
+                  message: "at least one of spec.vulnerabilities or spec.posture must be set"
+              properties:
+                author:
+                  type: string
+                reason:
+                  type: string
+                expiresAt:
+                  type: string
+                  format: date-time
+                match:
+                  type: object
+                  properties:
+                    namespaceSelector:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    objectSelector:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    resources:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - kind
+                        properties:
+                          apiGroup:
+                            type: string
+                          kind:
+                            type: string
+                          name:
+                            type: string
+                    images:
+                      type: array
+                      items:
+                        type: string
+                vulnerabilities:
+                  type: array
+                  items:
+                    type: object
+                    x-kubernetes-validations:
+                      - rule: "self.status != 'not_affected' || has(self.justification)"
+                        message: "justification is required when status is not_affected"
+                    required:
+                      - vulnerability
+                      - status
+                    properties:
+                      vulnerability:
+                        type: object
+                        required:
+                          - id
+                        properties:
+                          id:
+                            type: string
+                          aliases:
+                            type: array
+                            items:
+                              type: string
+                      status:
+                        type: string
+                        enum:
+                          - not_affected
+                          - fixed
+                          - under_investigation
+                      justification:
+                        type: string
+                        enum:
+                          - component_not_present
+                          - vulnerable_code_not_present
+                          - vulnerable_code_not_in_execute_path
+                          - vulnerable_code_cannot_be_controlled_by_adversary
+                          - inline_mitigations_already_exist
+                      impactStatement:
+                        type: string
+                      expiredOnFix:
+                        type: boolean
+                posture:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - controlID
+                      - action
+                    properties:
+                      controlID:
+                        type: string
+                      frameworkName:
+                        type: string
+                      action:
+                        type: string
+                        enum:
+                          - ignore
+                          - alert_only
+            status:
+              type: object
+      additionalPrinterColumns:
+        - name: Reason
+          type: string
+          jsonPath: .spec.reason
+        - name: Expires
+          type: string
+          jsonPath: .spec.expiresAt
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      subresources:
+        status: {}
+
+---
+# Source: kubescape-operator/crds/operator-command.crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: operatorcommands.kubescape.io
+spec:
+  group: kubescape.io
+  names:
+    plural: operatorcommands
+    singular: operatorcommand
+    kind: OperatorCommand
+    shortNames:
+      - opcmd
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                guid:
+                  type: string
+                commandType:
+                  type: string
+                commandVersion:
+                  type: string
+                  nullable: true
+                designators:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+                body:
+                  type: string
+                  format: byte
+                  nullable: true
+                ttl:
+                  type: string
+                  format: duration
+                  nullable: true
+                args:
+                  type: object
+                  additionalProperties: true
+                  nullable: true
+                commandIndex:
+                  type: integer
+                  nullable: true
+                commandCount:
+                  type: integer
+                  nullable: true
+            status:
+              type: object
+              properties:
+                started:
+                  type: boolean
+                startedAt:
+                  type: string
+                  format: date-time
+                  nullable: true
+                completed:
+                  type: boolean
+                completedAt:
+                  type: string
+                  format: date-time
+                  nullable: true
+                executer:
+                  type: string
+                  nullable: true
+                error:
+                  type: object
+                  nullable: true
+                  properties:
+                    reason:
+                      type: string
+                      nullable: true
+                    message:
+                      type: string
+                      nullable: true
+                    errorCode:
+                      type: integer
+                      nullable: true
+                payload:
+                  type: string
+                  format: byte
+                  nullable: true
+      subresources:
+        status: {}
+
+---
+# Source: kubescape-operator/crds/rules.crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: rules.kubescape.io
+spec:
+  group: kubescape.io
+  names:
+    kind: Rules
+    listKind: RulesList
+    plural: rules
+    singular: rule
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              properties:
+                rules:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: "Whether the rule is enabled"
+                      id:
+                        type: string
+                        description: "Unique identifier for the rule"
+                      name:
+                        type: string
+                        description: "Name of the rule"
+                      description:
+                        type: string
+                        description: "Description of the rule"
+                      expressions:
+                        type: object
+                        properties:
+                          message:
+                            type: string
+                            description: "Message expression"
+                          uniqueId:
+                            type: string
+                            description: "Unique identifier expression"
+                          ruleExpression:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                eventType:
+                                  type: string
+                                  description: "Type of event this expression handles"
+                                expression:
+                                  type: string
+                                  description: "The rule expression string"
+                              required:
+                                - eventType
+                                - expression
+                        required:
+                          - message
+                          - uniqueId
+                          - ruleExpression
+                      profileDependency:
+                        type: integer
+                        enum: [0, 1, 2]
+                        description: "Profile dependency level (0=Required, 1=Optional, 2=NotRequired)"
+                      profileDataRequired:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                        description: "Per-rule profile fields required for rule-aware projection."
+                      severity:
+                        type: integer
+                        description: "Severity level of the rule"
+                      supportPolicy:
+                        type: boolean
+                        description: "Whether the rule supports rule policy enforcement"
+                        default: false
+                      tags:
+                        type: array
+                        items:
+                          type: string
+                        description: "Tags associated with the rule"
+                      state:
+                        type: object
+                        additionalProperties: true
+                        description: "State information for the rule"
+                      agentVersionRequirement:
+                        type: string
+                        description: "Agent version requirement to evaluate this rule (supports semver ranges like ~1.0, >=1.2.0, etc.)"
+                      isTriggerAlert:
+                        type: boolean
+                        description: "Whether the rule is a trigger alert"
+                        default: true
+                      mitreTechnique:
+                        type: string
+                        description: "MITRE technique associated with the rule"
+                      mitreTactic:
+                        type: string
+                        description: "MITRE tactic associated with the rule"
+                    required:
+                      - enabled
+                      - id
+                      - name
+                      - description
+                      - expressions
+                      - profileDependency
+                      - severity
+                      - supportPolicy
+                      - isTriggerAlert
+                      - mitreTechnique
+                      - mitreTactic
+              required:
+                - rules
+      subresources:
+        status: {}
+
+---
+# Source: kubescape-operator/crds/security-exception.crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: securityexceptions.kubescape.io
+spec:
+  group: kubescape.io
+  names:
+    plural: securityexceptions
+    singular: securityexception
+    kind: SecurityException
+    shortNames:
+      - se
+  scope: Namespaced
+  versions:
+    - name: v1beta1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: ["spec"]
+          properties:
+            spec:
+              type: object
+              x-kubernetes-validations:
+                # expiresAt is not validated as future-dated: CRD CEL has no now(); expiry is enforced at scan time.
+                - rule: "(has(self.vulnerabilities) && size(self.vulnerabilities) > 0) || (has(self.posture) && size(self.posture) > 0)"
+                  message: "at least one of spec.vulnerabilities or spec.posture must be set"
+              properties:
+                author:
+                  type: string
+                reason:
+                  type: string
+                expiresAt:
+                  type: string
+                  format: date-time
+                match:
+                  type: object
+                  properties:
+                    objectSelector:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    resources:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - kind
+                        properties:
+                          apiGroup:
+                            type: string
+                          kind:
+                            type: string
+                          name:
+                            type: string
+                    images:
+                      type: array
+                      items:
+                        type: string
+                vulnerabilities:
+                  type: array
+                  items:
+                    type: object
+                    x-kubernetes-validations:
+                      - rule: "self.status != 'not_affected' || has(self.justification)"
+                        message: "justification is required when status is not_affected"
+                    required:
+                      - vulnerability
+                      - status
+                    properties:
+                      vulnerability:
+                        type: object
+                        required:
+                          - id
+                        properties:
+                          id:
+                            type: string
+                          aliases:
+                            type: array
+                            items:
+                              type: string
+                      status:
+                        type: string
+                        enum:
+                          - not_affected
+                          - fixed
+                          - under_investigation
+                      justification:
+                        type: string
+                        enum:
+                          - component_not_present
+                          - vulnerable_code_not_present
+                          - vulnerable_code_not_in_execute_path
+                          - vulnerable_code_cannot_be_controlled_by_adversary
+                          - inline_mitigations_already_exist
+                      impactStatement:
+                        type: string
+                      expiredOnFix:
+                        type: boolean
+                posture:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - controlID
+                      - action
+                    properties:
+                      controlID:
+                        type: string
+                      frameworkName:
+                        type: string
+                      action:
+                        type: string
+                        enum:
+                          - ignore
+                          - alert_only
+            status:
+              type: object
+      additionalPrinterColumns:
+        - name: Reason
+          type: string
+          jsonPath: .spec.reason
+        - name: Expires
+          type: string
+          jsonPath: .spec.expiresAt
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      subresources:
+        status: {}
+
+---
+# Source: kubescape-operator/crds/service-scan-result.crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: servicesscanresults.kubescape.io
+spec:
+  group: kubescape.io
+  names:
+    kind: ServiceScanResult
+    plural: servicesscanresults
+    shortNames:
+    - kssa
+    singular: servicescanresult
+  scope: Namespaced
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              clusterIP:
+                type: string             
+              ports:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    port:
+                      type: integer
+                    protocol:
+                      type: string
+                    sessionLayer:
+                      type: string
+                    presentationLayer:
+                      type: string
+                    applicationLayer:
+                      type: string
+                    authenticated:
+                      type: boolean
+                      nullable: true
+
+---
+# Source: kubescape-operator/charts/kubescape-alert-crd/crds/runtime-rule-binding.crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: runtimerulealertbindings.kubescape.io
+spec:
+  group: kubescape.io
+  names:
+    kind: RuntimeRuleAlertBinding
+    plural: runtimerulealertbindings
+    shortNames:
+    - rab
+    singular: runtimerulealertbinding
+  scope: Cluster
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              namespaceSelector:
+                type: object
+                properties:
+                  matchExpressions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        key:
+                          type: string
+                        operator:
+                          type: string
+                        values:
+                          type: array
+                          items:
+                            type: string
+                  matchLabels:
+                    type: object
+                    additionalProperties:
+                      type: string
+              podSelector:
+                type: object
+                properties:
+                  matchExpressions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        key:
+                          type: string
+                        operator:
+                          type: string
+                        values:
+                          type: array
+                          items:
+                            type: string
+                  matchLabels:
+                    type: object
+                    additionalProperties:
+                      type: string
+              rules:
+                type: array
+                items:
+                  type: object
+                  oneOf:
+                  - not:
+                      anyOf:
+                      - required: ["ruleID"]
+                      - required: ["ruleName"]
+                    required: ["ruleTags"]
+                  - not:
+                      anyOf:
+                      - required: ["ruleTags"]
+                      - required: ["ruleName"]
+                    required: ["ruleID"]
+                  - not:
+                      anyOf:
+                      - required: ["ruleTags"]
+                      - required: ["ruleID"]
+                    required: ["ruleName"]
+                  properties:
+                    parameters:
+                      type: object
+                      additionalProperties: true
+                    ruleID:
+                      type: string
+                    ruleName:
+                      type: string
+                    ruleTags:
+                      type: array
+                      items:
+                        type: string
+                    severity:
+                      type: string
+
+---
+# Source: kubescape-operator/templates/configs/priority-class.yaml
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: kubescape-critical
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: kubescape-critical
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: kubescape-critical
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+value: 1.000001e+08
+globalDefault: false
+description: "This priority class is for node-agent daemonset pods"
+---
+# Source: kubescape-operator/templates/kubescape/serviceaccount.yaml
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: kubescape
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: kubescape
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+  name: kubescape
+  namespace: kubescape
+automountServiceAccountToken: false
+---
+# Source: kubescape-operator/templates/kubevuln/serviceaccount.yaml
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: kubevuln
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: kubevuln
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+  name: kubevuln
+  namespace: kubescape
+automountServiceAccountToken: false
+---
+# Source: kubescape-operator/templates/node-agent/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: node-agent
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: node-agent
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: node-agent
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+---
+# Source: kubescape-operator/templates/operator/serviceaccount.yaml
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: operator
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: operator
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+  name: operator
+  namespace: kubescape
+automountServiceAccountToken: false
+---
+# Source: kubescape-operator/templates/storage/serviceaccount.yaml
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  name: storage
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: storage
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+---
+# Source: kubescape-operator/templates/configs/cloud-secret.yaml
+kind: Secret
+apiVersion: v1
+metadata:
+  name: cloud-secret
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: cloud-secret
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: cloud-secret
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+    kubescape.io/infra: credentials
+type: Opaque
+data:
+  account: ""
+  accessKey: ""
+---
+# Source: kubescape-operator/templates/operator/admission-webhook/secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kubescape-admission-webhook-ca
+  namespace: kubescape
+  annotations:
+    
+    "helm.sh/resource-policy": keep
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: operator
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: operator
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+type: kubernetes.io/tls
+data:
+  tls.key: LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlFb3dJQkFBS0NBUUVBdnliNCtJak43dWhlNmxLTEJVdU9NZHFSbmJFejl2emV5L0xHMkxIdjVySlpRS3lEClZqdjllOGgxSno4VncrS3pwQVpTVjQrQ0FkbnFwcTJQajdudHF2bDJnSk85UEl0dFVHSkJxVnpoVDd5eXVGRTQKL1o1YXRTWXpxbjg0NGJyRFgrcVZZYkxVcVdqa2Q1RjcwTGJJVTdOQ0s5NFVzQm94c09jdkJqRXYzUjhCQ0J6Vgo2YlQydHZDY0pxTXFReXVnMGFTT2J3bmpmS3lHRnprQUc3NHpVSUc2by9JR2JrbHUwNWRaZ1VFNTk1VThXMG1ECmtUbUtZUWtTMEVQMDNEZGRqS1NjSGJYS2R3aVMxSDNacFpIQzZUYWR5R2xyYkdSME1xcTIyY0tDSXNTUTl5Z2EKeHZkVUtlRUk5L2ZrZW5pRWJKeE5XNmVCcU56L3RHaDRRYXJ4endJREFRQUJBb0lCQUFRK2FrS2lUdWdoOHBHRApPYURwZDRPMTFZdkp0bHlpYXBQZWxQbVVvYjNlY2NyVXlhbXRkVWc5UUJTWit2SzVZc0dlZmsrQldTS1BZdjFHClZ5eWF0U01abkw3b0NNaUNVKy8zN250REc2RjRrQU0xa20xWENhNkI1WjNBYTFQZm9Kek5pWGw4emVuZzhVbVMKU2t4czhtK2hTRFBQSDJoMWZHcndCd1E5TFZIY1o0QWZNcFkvbS8ycmhBQzk3cDhJZ2VXc3hRU3Q2MG9SckdPVQo2dXYrT2xTcmFyUThucko5My93bnNZYjdTanBDM2g1KzNOb3llb1BNTHBTZnpvSG83eUY5Rk4ycWhzOEhHOW1PCmZITXRtbDBQcnhiYjBxZzdaVVFTOTZJZTEwMzd0YWV0aDVIV2tmMUtBVmU1UlMxeFFmRXNFYWFRamhaME5qbUMKdnN6MFVZRUNnWUVBekgwak56OTNaL2dUOUZOUkRXN3pLQVBzNEZTQ1pMbU1GcVhBcTdlVEE5MHNOTXdyUmdyawp0YUF3NURFdTFsTmMwdGRhamtBSm82QXZUN01waDRiVDdrZ3cvQ1VtYTVuZnRsTTdvL0FSNWpnUVo4ZlBhcWh5CjlFbTBNRTV1Q0wxUlFGY1JvQ2srTFRUdzM5MFViNWYzNG02MklqdEVjMlNKTmhPU0dudzYySThDZ1lFQTcwM00Kb1F5OE1pWTZmZWU5NXl2K21TVTRocHpxWWJ1K1duWDltMzBnWlU3SUxGa0orVi96SjdCZ3RUenREVlRhTnZTSwptOEFtYzNYemp6NTI4M1FaNGVpL09BZ21iSDExeFZiTCtUNHpEZ1FDMGN0T1FZRG1Kc3lZUlVEU1lFUmV5d1BRCjcrZ2ZsUitFakFpb2lFb091b3hwb1cwUUVpTFlWS3gwZkhCQ2NzRUNnWUFoVEg5Zmo4WXgrQVBIMVlsdFZwUGkKQUVHaWhpQjFwb0ZaYnNSaE1oT09uWVdGVTNuNGZlMmdaZVdRUXpJTlZLWFk3NWlmY1c0Z1p3Vk5SUytPRWphUQpwdERUUG5sekxDdHgxVHZ4QmpiajlsMDFpU1FOaWtDdDV4S2dpeVQvNTFSRDFlblkydDUxSGhuYlduVHBkeVcyCmliQy9Ba2V6UXJ2VlFucVlOWUtmb1FLQmdDdS9jRkpjN3FiSVlGY1dINXg4YVgzNzFQcWZBeVk4MlU3V1ZUZXcKeDFSZDg3QlAwc2Y1SjQydzYrMFdKMHdSb0JiOTI3MGZncWdHL3pESHZaMUNNMTBlWEo3VXRwbU0waFB5aXpXVQpqbWJZaXQ5cHFIUEhLY3djQ1JaWUJGMi9BZ2xoT0Rnem1scDd1WktVSHFOVHpwK0IvZW1aODU4dEtabEpNYjV5CkUyUEJBb0dCQUp5elB4TVV4dmpXRUU0bTY0TC9ZSC9kS2txam16Zy9UUmdZaGxHWHFYanpMU3R6OEsvUFZzU0kKUVNnNFJGZkc3WE9uREdzZnRGYnQ3dG1zU29aNUg0b08vL0M4M2FzbkVVZyt2aUNCWFd3aXN1TDNhbGYxdmxiOQpzZWIweWdrRGJkV3NXQzNYN0pnajZ0NnZEbWVZSnhvTWFuZUlqSzE2MC9jUVVSSEhUYVZWCi0tLS0tRU5EIFJTQSBQUklWQVRFIEtFWS0tLS0tCg==
+  tls.crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURJRENDQWdpZ0F3SUJBZ0lSQUtEOXBMeDZaSkpuQldNc1kwQ2lLWGt3RFFZSktvWklodmNOQVFFTEJRQXcKR2pFWU1CWUdBMVVFQXd3UEtpNXJkV0psYzJOaGNHVXVjM1pqTUI0WERUSTJNRGd3T0RFNE1EZzFPRm9YRFRNMgpNRGd3TlRFNE1EZzFPRm93R2pFWU1CWUdBMVVFQXd3UEtpNXJkV0psYzJOaGNHVXVjM1pqTUlJQklqQU5CZ2txCmhraUc5dzBCQVFFRkFBT0NBUThBTUlJQkNnS0NBUUVBdnliNCtJak43dWhlNmxLTEJVdU9NZHFSbmJFejl2emUKeS9MRzJMSHY1ckpaUUt5RFZqdjllOGgxSno4VncrS3pwQVpTVjQrQ0FkbnFwcTJQajdudHF2bDJnSk85UEl0dApVR0pCcVZ6aFQ3eXl1RkU0L1o1YXRTWXpxbjg0NGJyRFgrcVZZYkxVcVdqa2Q1RjcwTGJJVTdOQ0s5NFVzQm94CnNPY3ZCakV2M1I4QkNCelY2YlQydHZDY0pxTXFReXVnMGFTT2J3bmpmS3lHRnprQUc3NHpVSUc2by9JR2JrbHUKMDVkWmdVRTU5NVU4VzBtRGtUbUtZUWtTMEVQMDNEZGRqS1NjSGJYS2R3aVMxSDNacFpIQzZUYWR5R2xyYkdSMApNcXEyMmNLQ0lzU1E5eWdheHZkVUtlRUk5L2ZrZW5pRWJKeE5XNmVCcU56L3RHaDRRYXJ4endJREFRQUJvMkV3Clh6QU9CZ05WSFE4QkFmOEVCQU1DQXFRd0hRWURWUjBsQkJZd0ZBWUlLd1lCQlFVSEF3RUdDQ3NHQVFVRkJ3TUMKTUE4R0ExVWRFd0VCL3dRRk1BTUJBZjh3SFFZRFZSME9CQllFRkU4OGNPTjRXOWNKeGd5a2VveEh5Q3lscTIwcApNQTBHQ1NxR1NJYjNEUUVCQ3dVQUE0SUJBUUF1ZUJBdGtnTCtZeHdkTG03bkNVSDdVRllTb2FGeVdmckpINXZBCktaOWYxeHlLK1F0VmlNV1d6cTM0RUtqV3JPNzBqTHVSQXFQb1FSY1RJU3d4aU1BdEpuWEVOWFE2dFZPSTAvdksKWWFhaHFQLzh4MkttbVRyNlZOZ1U4eEsvQ2dFeUxHQUcvS1ZPRlJlcFJ0RnVjVVVkOVJRYmh1T3Z1TWMwVkw2Vgp5MWdBOE5NT0JiWmhpaFkwWHJDcUxTOENNTFc1c0hkaFJUbXlSVUhqV01pMThKQXpNQUxjN3RPZWMvTFBibDVJCjVGZmU5aUhlK2VmcnYyVFdkdnBjbS9xbDNJTmlnQnF6QndMK1kyaGN0RG1pWW1SbFlPTjBvMTd6S2NQZDh6eUgKRm96YlhUMmNzdkw4a1JMR1BYdmtQSEpnU2V2cDByNWMxNFZZTXJRYW90VWJteXpyCi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+---
+# Source: kubescape-operator/templates/operator/admission-webhook/secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kubescape-admission-webhook-tls
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: kubescape-admission-webhook
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: kubescape-admission-webhook
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+type: kubernetes.io/tls
+data:
+  tls.crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURjVENDQWxtZ0F3SUJBZ0lSQUtrSTdHV2ljdXVvTjhnTE5QVko3Q0l3RFFZSktvWklodmNOQVFFTEJRQXcKR2pFWU1CWUdBMVVFQXd3UEtpNXJkV0psYzJOaGNHVXVjM1pqTUI0WERUSTJNRGd3T0RFNE1EZzFPRm9YRFRNMgpNRGd3TlRFNE1EZzFPRm93TkRFeU1EQUdBMVVFQXhNcGEzVmlaWE5qWVhCbExXRmtiV2x6YzJsdmJpMTNaV0pvCmIyOXJMbXQxWW1WelkyRndaUzV6ZG1Nd2dnRWlNQTBHQ1NxR1NJYjNEUUVCQVFVQUE0SUJEd0F3Z2dFS0FvSUIKQVFDcFdkZEN6bnRzNFpvbHlFMFVOM1lNbjZ5WlZZb3FMTlRQTmVNV3NoRlNZNmFWeklnNm9FU2pobEZNSFFjSwpqYVBJUnpRaGZjMHR6VDFldncxdkRIbFZNTi9sWGo4VmFKM1dSZXQvL0k5Z2dRSjRKc1haQVF0OE14bFlWOHp4CkRLTVhHMGdwNFhmVGpmVHhBenVVUFFEY3dkeExGSVFlVWF3TS9wMmFxOHVoMVNKTElvWGlrdWZubkEvU0ZDVkIKTHk3c2U2YlpsNXFYTFlaUGd1cnpPNlZ5ZEdGZXFFRHFBa2VEc2tleURWS1hZQzF3ZnQ1YytKdWhXbW1CWWpQcgpNZVFwNlgwSTgvMWFKT2ZrbW8rNi9oQWJTcXllM0J6UUJjVkVxVFR3WFAxalZpYitHTit1a2dkZWMvU29GWVJpCnc3RjU3RzE2OFB6bDY5L011TkxFRWEzN0FnTUJBQUdqZ1pjd2daUXdEZ1lEVlIwUEFRSC9CQVFEQWdXZ01CMEcKQTFVZEpRUVdNQlFHQ0NzR0FRVUZCd01CQmdnckJnRUZCUWNEQWpBTUJnTlZIUk1CQWY4RUFqQUFNQjhHQTFVZApJd1FZTUJhQUZFODhjT040VzljSnhneWtlb3hIeUN5bHEyMHBNRFFHQTFVZEVRUXRNQ3VDS1d0MVltVnpZMkZ3ClpTMWhaRzFwYzNOcGIyNHRkMlZpYUc5dmF5NXJkV0psYzJOaGNHVXVjM1pqTUEwR0NTcUdTSWIzRFFFQkN3VUEKQTRJQkFRQ1FkUjhlZkt1MWNneXF3SXNreXhjU1RVdiszNlFKRHV3MjNRNHVSazUvRHhNdFgwQ2dsRUFISFF2RQptbW5vOHNXZDU0MjdjWHRabXM2dWNzeXFrTm43M3hIanZTcnQrQU9iZkhIbWVrNHhPMUx3R21aeVJIR1Z2S3V4ClloTDNqMkxjMjgrVHhGZFRmZFk0SlVvU1BaR3ovWVNSV3RmMzN1STluMW9hWFNsVGRtaWhiaStseU9Ta21MejIKa29tb25SdFlmT3Jrdkp5STBmenU4MTE0TE5HeEttWi9iYzFqaDFpUC90N3JZWjgyNVB0U01oNWlwL1ZSdjErZwpYd1VaKzBSb3kzWG4xazRZQkZnOWNuNE5qOVM0MU1GUVFuSTJYVllzRDZUK2VzZkdvZUdhWmhtVHErKzVoNW1tCldjYXU4N3h6VHdWeHQxMlFLWGtYNzIwVllRMFUKLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+  tls.key: LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlFcEFJQkFBS0NBUUVBcVZuWFFzNTdiT0dhSmNoTkZEZDJESitzbVZXS0tpelV6elhqRnJJUlVtT21sY3lJCk9xQkVvNFpSVEIwSENvMmp5RWMwSVgzTkxjMDlYcjhOYnd4NVZURGY1VjQvRldpZDFrWHJmL3lQWUlFQ2VDYkYKMlFFTGZETVpXRmZNOFF5akZ4dElLZUYzMDQzMDhRTTdsRDBBM01IY1N4U0VIbEdzRFA2ZG1xdkxvZFVpU3lLRgo0cExuNTV3UDBoUWxRUzh1N0h1bTJaZWFseTJHVDRMcTh6dWxjblJoWHFoQTZnSkhnN0pIc2cxU2wyQXRjSDdlClhQaWJvVnBwZ1dJejZ6SGtLZWw5Q1BQOVdpVG41SnFQdXY0UUcwcXNudHdjMEFYRlJLazA4Rno5WTFZbS9oamYKcnBJSFhuUDBxQldFWXNPeGVleHRldkQ4NWV2ZnpMalN4Qkd0K3dJREFRQUJBb0lCQUE2eUhRcENZakNKN3QyWApldGdNTEc4NE5HRnIrU213WGd4eGxNVWxoSGZrSU45LzhpRTJxV0ZkVzlUaFdGOWdraTc5OFRhb0FZMlhjVnRvCmpkMzdBYUdoTkc1TDc3V3VZMy8vVStQYjNJV3hDUmFGZ1RudGVHSmdDZ0JPMjgxRVhjUzQyWE9VOEZnaDQ1SSsKTGtYaHhvV3VjOGFEdjFyay9VVVBBaFpuM2Q3RTFqSkVzR1UwanovZ2M1REFKQWx3ZVdEdHdkOWNWN3JzR25GSQpkallHVzlDd3NSRHNOTURmWHlXK2JWdmJ6L2JuVnBZeitYTXlablQ0NEw3akNzN0JqbUtqRnpNUnhicFFhZWFRCkx5UjhuOVVVQ2dldXppTjZ3Nis1bWVieXphbDZYWmZ5K2dEMFViVmdGK3ZSZ0dubE50UkpHK1JPM3kwajJza1IKK00xSVFOa0NnWUVBeWE0ZWhZeXhzd3VaazRXSUsrc0hHeEduSk5lSGZBazhNaUkyZEw3ZmJ0Z2I0aEVHbjl5Nwp1TXNxRTh2K3dSL2RwKzI3eWRPNDBFVXltSmFTclhGZEpZTkhhRjBoVjFrY2ZEbXQ0bkdlNEFkOWc4OEtScDVwCkIrc1NIVWJUSWx5d05ZSDVCUGNsbnhuMi9XYjNKcUFhTEVvODFnVzdNTzFSK3VlclJ4VUNXR01DZ1lFQTF2YWQKOFQ0UzRiTFpSZTl4bDN4VklzdDgxN3lZc0M1cjBGelVOT2wvbjhhNnRneC9SREZ3V1FYU2pwYmRZNlJHdS9ITwpBTFZzZ0FER2RXc2xoQjREUmlUUllVWUlta0JlMVdYZ3hCSFA5ZjJ2N20xdEdCUERZK3pocnlWcXplamhEWHVtCkRGV09vaHRCVGVJeVBSSTkwRlFTMlU3c09NbXNLT016UTZaVmE0a0NnWUVBc0RHTStyR3k0VEFHS0twbEQ3RlIKME9VNE4raVB0ZDQvbDdEcUVFNWMxdks0VVdUOGU1Y1U3Vm1ZMWhqRzVLUFpPd2Rub3VoME1vZnhydnNGQTcvaApWNDk4U0FIc3llblJCL3BBSG0rVEZEZVhBUnRVNStNbThVTDkzVlB0eXJ4ZE9USG1ndDhFSUI1SCtKUUc0ZGpIClpPQXFpL1FQMkt2TWpqM3RGYm1XQmU4Q2dZQjE0bURUUDF0VGNxVThlUWN1TC96d1MrOTJ6L0pjQzlrTU54d1kKdUVSSTlzN0ZyeXpMMU9EcnNRbTdNSGpRZi9KYWQweWxqdGlsaWNkTDlTcHB2WnZHQjhMYk9YRFdScDY3SUZlVwpycjRCQk5KS1NyQWRHQmw2M3hrVTE4d3VoNXVEclY5dVBDMHdNUW9yRC9URkVRL2RBMzRpdGVsTmF5dUNjTFpZClR3dGhJUUtCZ1FDTzhKTU1Zam5Wa3FQQzBlNTJMNzZzUVFKVnFLckY4c2dGV0ZmY3JZUzRBaFdPVVpBOWRvcjEKeFR6WkErUzM2N0hHOEVkYS92Um9KRVdUc05DN09wQnVOMXBiQllUaTRLMmxKazM1S0hMWkFIZEF0aTRqenIxNQpzcGEzOHVncmtjbXdFbXJQTS9lT2dWK3Q5ZXQwT0pQR01Ld1VjSzBBYVU0WHZ2ZGM5VGdzTEE9PQotLS0tLUVORCBSU0EgUFJJVkFURSBLRVktLS0tLQ==
+  ca.crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURJRENDQWdpZ0F3SUJBZ0lSQUtEOXBMeDZaSkpuQldNc1kwQ2lLWGt3RFFZSktvWklodmNOQVFFTEJRQXcKR2pFWU1CWUdBMVVFQXd3UEtpNXJkV0psYzJOaGNHVXVjM1pqTUI0WERUSTJNRGd3T0RFNE1EZzFPRm9YRFRNMgpNRGd3TlRFNE1EZzFPRm93R2pFWU1CWUdBMVVFQXd3UEtpNXJkV0psYzJOaGNHVXVjM1pqTUlJQklqQU5CZ2txCmhraUc5dzBCQVFFRkFBT0NBUThBTUlJQkNnS0NBUUVBdnliNCtJak43dWhlNmxLTEJVdU9NZHFSbmJFejl2emUKeS9MRzJMSHY1ckpaUUt5RFZqdjllOGgxSno4VncrS3pwQVpTVjQrQ0FkbnFwcTJQajdudHF2bDJnSk85UEl0dApVR0pCcVZ6aFQ3eXl1RkU0L1o1YXRTWXpxbjg0NGJyRFgrcVZZYkxVcVdqa2Q1RjcwTGJJVTdOQ0s5NFVzQm94CnNPY3ZCakV2M1I4QkNCelY2YlQydHZDY0pxTXFReXVnMGFTT2J3bmpmS3lHRnprQUc3NHpVSUc2by9JR2JrbHUKMDVkWmdVRTU5NVU4VzBtRGtUbUtZUWtTMEVQMDNEZGRqS1NjSGJYS2R3aVMxSDNacFpIQzZUYWR5R2xyYkdSMApNcXEyMmNLQ0lzU1E5eWdheHZkVUtlRUk5L2ZrZW5pRWJKeE5XNmVCcU56L3RHaDRRYXJ4endJREFRQUJvMkV3Clh6QU9CZ05WSFE4QkFmOEVCQU1DQXFRd0hRWURWUjBsQkJZd0ZBWUlLd1lCQlFVSEF3RUdDQ3NHQVFVRkJ3TUMKTUE4R0ExVWRFd0VCL3dRRk1BTUJBZjh3SFFZRFZSME9CQllFRkU4OGNPTjRXOWNKeGd5a2VveEh5Q3lscTIwcApNQTBHQ1NxR1NJYjNEUUVCQ3dVQUE0SUJBUUF1ZUJBdGtnTCtZeHdkTG03bkNVSDdVRllTb2FGeVdmckpINXZBCktaOWYxeHlLK1F0VmlNV1d6cTM0RUtqV3JPNzBqTHVSQXFQb1FSY1RJU3d4aU1BdEpuWEVOWFE2dFZPSTAvdksKWWFhaHFQLzh4MkttbVRyNlZOZ1U4eEsvQ2dFeUxHQUcvS1ZPRlJlcFJ0RnVjVVVkOVJRYmh1T3Z1TWMwVkw2Vgp5MWdBOE5NT0JiWmhpaFkwWHJDcUxTOENNTFc1c0hkaFJUbXlSVUhqV01pMThKQXpNQUxjN3RPZWMvTFBibDVJCjVGZmU5aUhlK2VmcnYyVFdkdnBjbS9xbDNJTmlnQnF6QndMK1kyaGN0RG1pWW1SbFlPTjBvMTd6S2NQZDh6eUgKRm96YlhUMmNzdkw4a1JMR1BYdmtQSEpnU2V2cDByNWMxNFZZTXJRYW90VWJteXpyCi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+---
+# Source: kubescape-operator/templates/storage/certgen/secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: storage-tls-ca
+  namespace: kubescape
+  annotations:
+    
+    "helm.sh/resource-policy": keep
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: storage
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+type: kubernetes.io/tls
+data:
+  tls.crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURGVENDQWYyZ0F3SUJBZ0lRUDFiYktER09ObTYwek9OcjArRFNYREFOQmdrcWhraUc5dzBCQVFzRkFEQVYKTVJNd0VRWURWUVFERXdwemRHOXlZV2RsTFdOaE1CNFhEVEkyTURnd09ERTRNRGcxT0ZvWERUSTRNRGd3TnpFNApNRGcxT0Zvd0ZURVRNQkVHQTFVRUF4TUtjM1J2Y21GblpTMWpZVENDQVNJd0RRWUpLb1pJaHZjTkFRRUJCUUFECmdnRVBBRENDQVFvQ2dnRUJBS0FLWW1XY1dCRjhNN0VvWGJ6c0JXRFEzM0IvQ3pSSk1ycEViSWdDTDJpenJFM2IKQzd3QnJtZDJXYzNYZkVzQzVYTnRreHBOd0JFOFN6WGYzYzk2ZVFjdUxEMTd6MWpkOTNua0hxUGxLNEZIVU5ZRQpKUGRwL1NSY2ZBODF2Z0FDTDVQajBXVTNtVzdmR3V4aSs5Qk1iczE3a3V5UEF1NFdZN2Fud1NhdTNEK1ZnaVZnCjliZGlScnBaaFpWWjZadnN3bHdxQXN2SVZrY25wbVVCWTBRZ1EweUtCWXQxdVJFVndrT24yZnRZTlloZng4elEKUWQ0eGlabi9Fbm9UUmNNOVIzdTljaDMrOVpsUVFlb2QwS1FzdHV1TFRvZ0xwZndtV2k0dlZ4eEI0bWY4Z3hibgpISVlEbEJSK25HSnI3TGk1cldkNWwxbVJJZEtkamQvRWc1VWptd1VDQXdFQUFhTmhNRjh3RGdZRFZSMFBBUUgvCkJBUURBZ0trTUIwR0ExVWRKUVFXTUJRR0NDc0dBUVVGQndNQkJnZ3JCZ0VGQlFjREFqQVBCZ05WSFJNQkFmOEUKQlRBREFRSC9NQjBHQTFVZERnUVdCQlJadnhrSkZZYy9BQko1UlBTRlFidVB1S2xManpBTkJna3Foa2lHOXcwQgpBUXNGQUFPQ0FRRUFiNHQzRlRHbWdYOE1tVm9xSjR5Z2ExanowY1NUVENvN0ErQXRwRGtaZ1hhckR3Tlo2TnVyClZlQ0ZpaG1sTG5GOHE2WUxZa2dVeHB5M2x3Z3lTbCtaWHc5QUw2MHFnTVU2ODBoWExwS3BkWWJoTmk4Y2VUVU4KSlZMYTlNYVhHYzdIaHhaTjFrUjUrb0lMMjkwK2g2aEVXZllITGc4bmRzT1lMZm1yRGM1VVlzQnBkK2EzdFo5dAo5Mkd4bUUrcWJ6Y1J1dzY0Q055dll3dW5XQld4NWlxSnJ1d0Flbm5BOWNVODl6VHlaWmFhemtvRmRoRWtzWTIvCjNhcXdoejloTTdVdW1EbkFPOHNwSkZDMHh1VTk1Vm1zcTljSGViVi8yclU2UjRaam4zcDl5ZU14cytOcThPWHcKdXpyQ3lUcFFOYmNFbjRyclM4R2hRZXJnRUtUMlFqUGNadz09Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+  tls.key: LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlFb3dJQkFBS0NBUUVBb0FwaVpaeFlFWHd6c1NoZHZPd0ZZTkRmY0g4TE5Fa3l1a1JzaUFJdmFMT3NUZHNMCnZBR3VaM1paemRkOFN3TGxjMjJUR2szQUVUeExOZC9kejNwNUJ5NHNQWHZQV04zM2VlUWVvK1VyZ1VkUTFnUWsKOTJuOUpGeDhEelcrQUFJdmsrUFJaVGVaYnQ4YTdHTDcwRXh1elh1UzdJOEM3aFpqdHFmQkpxN2NQNVdDSldEMQp0MkpHdWxtRmxWbnBtK3pDWENvQ3k4aFdSeWVtWlFGalJDQkRUSW9GaTNXNUVSWENRNmZaKzFnMWlGL0h6TkJCCjNqR0ptZjhTZWhORnd6MUhlNzF5SGY3MW1WQkI2aDNRcEN5MjY0dE9pQXVsL0NaYUxpOVhIRUhpWi95REZ1Y2MKaGdPVUZINmNZbXZzdUxtdFozbVhXWkVoMHAyTjM4U0RsU09iQlFJREFRQUJBb0lCQUJBQVpIZUxFRXNwN2ZQZApUZ2RoQkpDazV4SlZGdHV5emVoTjJ4bDdqbk5HTTdOOUhwNlNWSFp5ZGp3eDVYTGlrVC9mU1lGWEczTWR0NFM2Cnpob1JRWFNmQUpGaWhiTE8rV1dEUE5wZm1ZcWkyaDdyNmRPZ1owMGNGTk5qS09JbUFIZlFUdFFkOWx0ZGpLV1gKVXJJd1VqWjlaVGY5MGVuWVFlbGd1ekU3bm8zdmVSUXNIZEF3VFpZY3M2MDU4cGtqa2lnOUNxY3JndnEzVU9wRQpNSzBtY2t6VlQvMEUwQVFyZVp6Y3hjTUh2NUpRT2pabUVXanJYVXBBUkwySVVpaXhaT09aU3FEQVRaU1UyR3JECkRtZTMyRmIwWTJxS3ppUzN4N3hOejJHNzNxVkF3bm1RaDd3Tkl3NmxGL1BwWkJKMlB1dkN4WGJEalE3c2h1d2QKaVpPZlZxa0NnWUVBMURzYzQ5N0I5QkZsZ3hFcEsvcmo2aWx0WDZpbDBiaWV4aW9yUmNBVW5HQ1BIWDhVYW9WeQoxbGR3ZG1wVDdpT3lWbzRnYzVweHZzMVNndlNBL2NmWnRhNWFRVzdSVkdKUDlpVDB3MmlrQW9EU1AvTVlvZnlPCm94QUZSRzlZVGdYSkkzQ0E1NUNhaTZScFZJWUpMY2U2ZXdkYWZ2TmtaLzlTWU9wZnpQc20vazhDZ1lFQXdRdlkKQWd6L3ZHTlNscjVQOHpBZkNXRWFWdmpvcWttaUU0RGhuZGRTSUZKR2dwYXpySWZuMzBjTUxtcGliM21GaTkxbApkQ0tXMXpaT0tOVW1rYzZidlYwTDlKSGtsZWNUeW44S2JjZFBUR21adkdYN0ZzVUxyWHBOK2NzN2dPanVPOW5hCkNEQ2hKTHRMMlRUM05JUVd0cnpoamVod3FMOUJRaUpvYkh1dnNHc0NnWUVBejFaNDRQM05DajY4cDVGcVliY1kKVnJubVNxQWViNGNvUm4wSURYcWNLRElGWDFHNWhsK2RVMTNWVnpxRmlJK0RPU0JjLzlPUThGRHpIVkQxZS9sMAo3aFBKeFVjWVpwSXRnRkdXZGhtU3NZZGM0SEVFVGF6SlJQRHYxRzNiSFU1MXRKUEN1M2dBSkJDWmZxUDc3NmZDCnZWTHZ6RHJJaXZsYlo2ZFJ0SlpnLyswQ2dZQXVPREs0a3ZvcjFhL3hiWkZnelZXdy9qRzdQdzhkcmxHQ3orbTAKeTlmYTZ6ZjhqaTVva1lWL25OZ2F5TmZXanNiZHJOMWNoK2VMa1hIM0xzbDBRWDVpUVVQYWc0K3lJRWhKeEU3dgo1N2RodVNyWXc2WHhWcTRzRTh0VmtrWWw0QjhoNzAvWGhDVWcwVU1ndHlDMHp5ZE5DejRKcHV4S1NyaEtLRWpPCktITHhEd0tCZ0dMNWppOC9EcXNHdnpIVE4reE15dEZjSzdhSDlKMHBmRS8xRXRnZmJQKzNXbVFxb0paeStIY2UKS0wrSk54Y284SXZzRVZXMytTUld5dWFUYS9XOE1HM2ZUMm1PT2xmNDlaZVZoK25QenE4ck4xd1RuWXhENG5ISQpPc1h4bC81ZmZ4ZDBNSVNJSzF2QkpQUTRDU1VBWUNCa3Z1SDA0WmRDaDltRzRybTZvSHhWCi0tLS0tRU5EIFJTQSBQUklWQVRFIEtFWS0tLS0tCg==
+---
+# Source: kubescape-operator/templates/storage/certgen/secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: storage-tls
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: storage
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+type: kubernetes.io/tls
+data:
+  tls.crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURhRENDQWxDZ0F3SUJBZ0lRRlhtdFVaUUQ2VUVRbkkvWndzRnlIekFOQmdrcWhraUc5dzBCQVFzRkFEQVYKTVJNd0VRWURWUVFERXdwemRHOXlZV2RsTFdOaE1CNFhEVEkyTURnd09ERTRNRGcxT0ZvWERUSTRNRGd3TnpFNApNRGcxT0Zvd0lERWVNQndHQTFVRUF4TVZjM1J2Y21GblpTNXJkV0psYzJOaGNHVXVjM1pqTUlJQklqQU5CZ2txCmhraUc5dzBCQVFFRkFBT0NBUThBTUlJQkNnS0NBUUVBNmVpZFNWUWNXVzgzR1pmbERqYmVWeVdFZUkrSXdDQm4KdXZnckdDTDRGcWkrdHJPRkwyc2lyVEt1TFhIck5ZbkV5NmtuQmt0VmZGamVNMUJyajVqeE1DRFoyUHZLcUt6QQo5cDFPYk1WT2IzeVlzZ2lTL0lxSzJpWlQ0N0xycncwZUowNTJqeGgwYnRwTFZQV0VVem9FVDJLaUFWaFRCazZFCnZhU1NETlpYb1FubDNqUlUzS0tnYllFazl2cURteFltblpSM2NUYmhRVk0vNDVIcGVQRGVxZzVEU3ZYMmk2bG8KYWV4Zmx6enlwS2c1eFFGT1BOeXErT2pVeXNFdnI3NklnYU1KVDFZaDNZdndnakdETnMwVStzb0R5UzNDOURzagpSUEZoR3hUNDhFNUtYOUlZdkh1aUJPMnphV3c5ckxrM1RkdkVTV3p6NS9zSXUwck9jMDQxOHdJREFRQUJvNEdvCk1JR2xNQTRHQTFVZER3RUIvd1FFQXdJRm9EQWRCZ05WSFNVRUZqQVVCZ2dyQmdFRkJRY0RBUVlJS3dZQkJRVUgKQXdJd0RBWURWUjBUQVFIL0JBSXdBREFmQmdOVkhTTUVHREFXZ0JSWnZ4a0pGWWMvQUJKNVJQU0ZRYnVQdUtsTApqekJGQmdOVkhSRUVQakE4Z2hWemRHOXlZV2RsTG10MVltVnpZMkZ3WlM1emRtT0NJM04wYjNKaFoyVXVhM1ZpClpYTmpZWEJsTG5OMll5NWpiSFZ6ZEdWeUxteHZZMkZzTUEwR0NTcUdTSWIzRFFFQkN3VUFBNElCQVFBbmpXeS8KQ3B5ek5reGI3ZWtMbFRDN2N4bmJvdjRjdW85NXpYcHBoVFh3Z0Q4K1JBdGxpMXhlNHVhVE54WnpjL3RlNUF1UQpjTHlHZytiRGdtTjNscXF5Wm9HazV3S3VrdW9sUm9Na0xCMlBENTVzNTVObzhrSVpkU2FyK2dpN2ZZeUNUQmorCmNqb3c4SkVVczZ5Q0gxUXlzeTRLZzlkS01HVzJUakNUa1RDZUZwUjE3WjVvNjJCMGpQQ1JzRGVVUE5CeDNpQjMKY3NJNXhERnFKUklpOXpGd05IMjNCU0daZWkyRWdlb05yckRROEl5VXYyOFplemxEbW5nRWFQNEJlMVNRcTB0VgppVEl3UjljYU9ueWFMU3ZNYVNORDFPQzVGTmphMCtBNEJNbmhXSnMxVG1IZDBaN0N1TXU2aExrUi9MSWRRdFd5CmhEK3BNRE4wdm8zblZobzMKLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+  tls.key: LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlFcEFJQkFBS0NBUUVBNmVpZFNWUWNXVzgzR1pmbERqYmVWeVdFZUkrSXdDQm51dmdyR0NMNEZxaSt0ck9GCkwyc2lyVEt1TFhIck5ZbkV5NmtuQmt0VmZGamVNMUJyajVqeE1DRFoyUHZLcUt6QTlwMU9iTVZPYjN5WXNnaVMKL0lxSzJpWlQ0N0xycncwZUowNTJqeGgwYnRwTFZQV0VVem9FVDJLaUFWaFRCazZFdmFTU0ROWlhvUW5sM2pSVQozS0tnYllFazl2cURteFltblpSM2NUYmhRVk0vNDVIcGVQRGVxZzVEU3ZYMmk2bG9hZXhmbHp6eXBLZzV4UUZPClBOeXErT2pVeXNFdnI3NklnYU1KVDFZaDNZdndnakdETnMwVStzb0R5UzNDOURzalJQRmhHeFQ0OEU1S1g5SVkKdkh1aUJPMnphV3c5ckxrM1RkdkVTV3p6NS9zSXUwck9jMDQxOHdJREFRQUJBb0lCQUM2RitMcThBd042emwvRgp5V1pCWFluQnlZNWRKaHJvbHhrbUFSUkU2RWxCZU9WSDRZYWo3WHE3YU05YktDZzI1YkNJVFYzQUlCbWlaMWVYCmVEMVFjekJhYUZuekFzVDN6MDE5empwdUtBS2VxcFJHaGsyNmxKRjlMQlJPNHZlblNVY1NJUnluQlltQzI1YmoKV2xWZlpib1FhUjZSWGJvVVpleCtUaHBGaTVwWXgwV3hVQkJpVTF1dmN5Qy9hNGlCK0w5d2dlYUtGS2RhaTlGTgppSGkraGhxR0Z6SnVoeTc2ZWExdUtoSGJLazJBUnJYaTNPRXdldUpNUWI0aEZObFBYSEszaGlKUk1HYzFabUQvCkhMTmJ0RE8vWjZNRW5rMGxJSlNyYzdwN2xJN29NM21NcGN0Q1U3NWlnU1RuQTFaUXAxejQ3cVlvT1ZKMTB2VE4KanBMcng3a0NnWUVBK2J4NUR0UGRQV1hZZmV1S3EvWEx3aVIwWTNRWmIyZG1xTWhXdnI5dVJnNm5HZU10d1NjTwpNOThCbldUbGhPUmdyQWlFYm1EaFc3US9jdXpFcE5BS3d1NXhpdXZZbm9mZkxKRmFlQk9jSFBBU1lxL2twbUJWCnJmT2lVVlUwMmFpZE92NXhXVFBNd3FGdVNXWi9PdFE2elZCaGpiNnN5R0l3Z3ZLVUVuYlpuWjhDZ1lFQTc4YUQKdCtqZWM2b1BvQy9IV2FQMi81alJmbmtLU3VETFIwWnBUZW0rb3dqZWppcEIwdEFQY0N0NDlUZ3dnQS9Fd0RuZgowby80VXJDWTRtWk9wOGFBTHdtRmZwYVE3QnB0TTEzOGdIbE5ZRXg2VTdzUitqdWwzd1ZoMUQ5Q3dDZ2R2TGtRCnlnLy9GSHJPQ2ozWFRnbmpISmsyV0x1RWt4WnB1elhyS2dsQTN5MENnWUI2TnNubmY3Y2RmT0hkZlk5M1orbzMKTUMvbEc4UDJ5TnRzYmQ1RnF0a0VYOWRXeTk1d1QvU2JYZDhrYjJRRERPQmlVQ2krKzVwTmpvQWVkZEFsOThuTQphM1FWVUNYS0x5UUFZNEdxa2E0c1d6QWtLMy95QytMaUpnQ2hYTmxvU3lQbTR1NEZnVndMUTRUOVZyT2N6bytZCk9tWURQL1MrZTQ3U0JuU0FOTGw2Y1FLQmdRQ3IybUIxNUJYc1dLc3lhSXc5RjJQazlpYlF1dmhCaXJTbnRUT3MKZ0NmK3VsQ3BIR2hwTEc2a09zUkxIYWJGWW9mbUxwVFpXZzdsVldWK2YwMUl1dUVNMVlvMG5MM3FPMWFoUm0rLwp0VEZjSC9SZEp1dFBxb2pNUEJOT0NMbFMrRzIzNGZ6Q2xveUFwVFFmNndyeUIrd2JoMFNJZkg0YzNpZVI0cWRXClRhT05VUUtCZ1FDL2JCVUw5YW1GL3ByWW1QbWNack1HTXg0NS8zclZrc0x3UENMVm5yVUYwZDgzUjM1ZUNlYTgKVzNvaXRFb2VPSkZnVklBN3NhVTZ1L3VTSDIzN0xIUnFuaU5FTkdhUHRNNlVrVGt4dFR5N2Q0RExSc1N1THhKSAo3c0lhNERXdXJ5Y2c2U1dDenNlVUF2R2tRby9rR3Y4M0ZQYnl6d21WYjlUWDliNDdralBWNUE9PQotLS0tLUVORCBSU0EgUFJJVkFURSBLRVktLS0tLQ==
+  ca.crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURGVENDQWYyZ0F3SUJBZ0lRUDFiYktER09ObTYwek9OcjArRFNYREFOQmdrcWhraUc5dzBCQVFzRkFEQVYKTVJNd0VRWURWUVFERXdwemRHOXlZV2RsTFdOaE1CNFhEVEkyTURnd09ERTRNRGcxT0ZvWERUSTRNRGd3TnpFNApNRGcxT0Zvd0ZURVRNQkVHQTFVRUF4TUtjM1J2Y21GblpTMWpZVENDQVNJd0RRWUpLb1pJaHZjTkFRRUJCUUFECmdnRVBBRENDQVFvQ2dnRUJBS0FLWW1XY1dCRjhNN0VvWGJ6c0JXRFEzM0IvQ3pSSk1ycEViSWdDTDJpenJFM2IKQzd3QnJtZDJXYzNYZkVzQzVYTnRreHBOd0JFOFN6WGYzYzk2ZVFjdUxEMTd6MWpkOTNua0hxUGxLNEZIVU5ZRQpKUGRwL1NSY2ZBODF2Z0FDTDVQajBXVTNtVzdmR3V4aSs5Qk1iczE3a3V5UEF1NFdZN2Fud1NhdTNEK1ZnaVZnCjliZGlScnBaaFpWWjZadnN3bHdxQXN2SVZrY25wbVVCWTBRZ1EweUtCWXQxdVJFVndrT24yZnRZTlloZng4elEKUWQ0eGlabi9Fbm9UUmNNOVIzdTljaDMrOVpsUVFlb2QwS1FzdHV1TFRvZ0xwZndtV2k0dlZ4eEI0bWY4Z3hibgpISVlEbEJSK25HSnI3TGk1cldkNWwxbVJJZEtkamQvRWc1VWptd1VDQXdFQUFhTmhNRjh3RGdZRFZSMFBBUUgvCkJBUURBZ0trTUIwR0ExVWRKUVFXTUJRR0NDc0dBUVVGQndNQkJnZ3JCZ0VGQlFjREFqQVBCZ05WSFJNQkFmOEUKQlRBREFRSC9NQjBHQTFVZERnUVdCQlJadnhrSkZZYy9BQko1UlBTRlFidVB1S2xManpBTkJna3Foa2lHOXcwQgpBUXNGQUFPQ0FRRUFiNHQzRlRHbWdYOE1tVm9xSjR5Z2ExanowY1NUVENvN0ErQXRwRGtaZ1hhckR3Tlo2TnVyClZlQ0ZpaG1sTG5GOHE2WUxZa2dVeHB5M2x3Z3lTbCtaWHc5QUw2MHFnTVU2ODBoWExwS3BkWWJoTmk4Y2VUVU4KSlZMYTlNYVhHYzdIaHhaTjFrUjUrb0lMMjkwK2g2aEVXZllITGc4bmRzT1lMZm1yRGM1VVlzQnBkK2EzdFo5dAo5Mkd4bUUrcWJ6Y1J1dzY0Q055dll3dW5XQld4NWlxSnJ1d0Flbm5BOWNVODl6VHlaWmFhemtvRmRoRWtzWTIvCjNhcXdoejloTTdVdW1EbkFPOHNwSkZDMHh1VTk1Vm1zcTljSGViVi8yclU2UjRaam4zcDl5ZU14cytOcThPWHcKdXpyQ3lUcFFOYmNFbjRyclM4R2hRZXJnRUtUMlFqUGNadz09Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+---
+# Source: kubescape-operator/templates/configs/cloudapi-configmap.yaml
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: ks-cloud-config
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: ks-cloud-config
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: ks-cloud-config
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+    kubescape.io/infra: config
+data:
+  clusterData: |
+    {
+      "serviceDiscovery": false,
+      "vulnScanURL": "kubevuln:8080",
+      "kubevulnURL": "kubevuln:8080",
+      "kubescapeURL": "kubescape:8080",
+      "clusterName": "default",
+      "storage": true,
+      "relevantImageVulnerabilitiesEnabled": true,
+      "namespace": "kubescape",
+      "imageVulnerabilitiesScanningEnabled": true,
+      "postureScanEnabled": true,
+      "nodeAgent": "true",
+      "maxImageSize": 5.36870912e+09,
+      "maxSBOMSize": 2.097152e+07,
+      "keepLocal": true,
+      "scanTimeout": "5m",
+      "scanEmbeddedSBOMs": false,
+      "vexGeneration": false,
+      "cveMatchingMode": "adaptive",
+      "useDefaultMatchers": false,
+      "storeFilteredSbom": false,
+      "continuousPostureScan": false,
+      "relevantImageVulnerabilitiesConfiguration": "enable",
+      "riskAcceptance": false
+    }
+---
+# Source: kubescape-operator/templates/configs/components-configmap.yaml
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: ks-capabilities
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: ks-capabilities
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: ks-capabilities
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+data:
+  capabilities: |
+    {
+      "capabilities":{"admissionController":"enable","autoUpgrading":"disable","configurationScan":"enable","continuousScan":"disable","httpDetection":"enable","kubescapeOffline":"disable","malwareDetection":"disable","manageWorkloads":"disable","networkEventsStreaming":"enable","networkPolicyService":"enable","nodeProfileService":"enable","nodeSbomGeneration":"enable","nodeScan":"enable","operator":"enable","prometheusExporter":"disable","relevancy":"enable","remediation":"disable","riskAcceptance":"disable","runtimeDetection":"disable","runtimeObservability":"enable","scanEmbeddedSBOMs":"disable","seccompProfileBackend":"crd","seccompProfileService":"enable","syncSBOM":"disable","testing":{"nodeAgentMultiplication":{"enabled":false,"replicas":5}},"vexGeneration":"disable","vulnerabilityScan":"enable"},
+      "effectiveCapabilities":{"configurationScan":"enable","httpDetection":"disable","networkEventsStreaming":"disable","nodeProfileService":"disable","nodeScan":"enable","vulnerabilityScan":"enable"},
+      "capabilityWarnings":["capabilities.nodeProfileService=enable but the backend is not configured (.Values.server is empty / submit is disabled). This capability requires the synchronizer, which is only enabled when connected to a backend, so nodeProfileServiceEnabled renders as FALSE in the node-agent configmap and node profiles will NOT be generated. To use it, set .Values.server (requires account and accessKey, or an existing credentials.cloudSecret).","capabilities.networkEventsStreaming=enable but the backend is not configured (.Values.server is empty / submit is disabled). This capability requires submitting data to a backend, so networkStreamingEnabled renders as FALSE in the node-agent configmap and network events will NOT be streamed. To use it, set .Values.server (requires account and accessKey, or an existing credentials.cloudSecret).","capabilities.httpDetection=enable but capabilities.runtimeDetection is not enabled. HTTP detection runs on top of runtime detection, so httpDetectionEnabled renders as FALSE in the node-agent configmap. To use it, set capabilities.runtimeDetection=enable."],
+      "components":{"autoUpdater":{"enabled":false},"clamAV":{"enabled":false},"cloudSecret":{"create":true,"name":"cloud-secret"},"customCaCertificates":{"name":"custom-ca-certificates"},"kubescape":{"enabled":true},"kubescapeScheduler":{"enabled":true},"kubevuln":{"enabled":true},"kubevulnScheduler":{"enabled":true},"nodeAgent":{"enabled":true},"operator":{"enabled":true},"prometheusExporter":{"enabled":false},"sbomScanner":{"enabled":false},"serviceDiscovery":{"enabled":false},"storage":{"enabled":true},"synchronizer":{"enabled":false}},
+      "configurations":{"excludeJsonPaths":null,"otelUrl":null,"persistence":"enable","priorityClass":{"daemonset":100000100,"enabled":true},"prometheusAnnotations":"disable"} ,
+      "serviceScanConfig" :{"enabled":false,"interval":"1h"}
+    }
+---
+# Source: kubescape-operator/templates/configs/matchingRules-configmap.yaml
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: cs-matching-rules
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: kubescape
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: kubescape
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+data:
+  matchingRules.json: |
+    {"match":[{"apiGroups":["apps"],"apiVersions":["v1"],"resources":["deployments"]}],"namespaces":["default"]}
+---
+# Source: kubescape-operator/templates/kubescape-scheduler/configmap.yaml
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: kubescape-scheduler
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: kubescape-scheduler
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: kubescape-scheduler
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+data:
+  request-body.json: |-
+    {"commands":[{"CommandName":"kubescapeScan","args":{"scanV1":{}}}]}
+---
+# Source: kubescape-operator/templates/kubescape/host-scanner-definition-configmap.yaml
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: host-scanner-definition
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: ks-cloud-config
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: ks-cloud-config
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+data:
+  host-scanner-yaml: |-
+---
+# Source: kubescape-operator/templates/kubevuln-scheduler/configmap.yaml
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: kubevuln-scheduler
+  namespace: kubescape
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: kubevuln-scheduler
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: kubevuln-scheduler
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+data:
+  request-body.json: |-
+    {"commands":[{"commandName":"scan","designators":[{"designatorType":"Attributes","attributes":{}}]}]}
+---
+# Source: kubescape-operator/templates/node-agent/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: node-agent
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: node-agent
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: node-agent
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+data:
+  config.json: |
+    {
+        "applicationProfileServiceEnabled": true,
+        "backendStorageEnabled": false,
+        "prometheusExporterEnabled": false,
+        "runtimeDetectionEnabled": false,
+        "httpDetectionEnabled": false,
+        "networkServiceEnabled": true,
+        "malwareDetectionEnabled": false,
+        "hostMalwareSensorEnabled": false,
+        "hostNetworkSensorEnabled": false,
+        "hostSensorEnabled": true,
+        "hostSensorInterval": "5m",
+        "nodeProfileServiceEnabled": false,
+        "networkStreamingEnabled": false,
+        "maxImageSize": 5.36870912e+09,
+        "maxSBOMSize": 2.097152e+07,
+        "sbomGenerationEnabled": true,
+        "enableEmbeddedSBOMs": false,
+        "seccompServiceEnabled": true,
+        "seccompProfileBackend": "crd",
+        "initialDelay": "2m",
+        "updateDataPeriod": "10m",
+        "nodeProfileInterval": "10m",
+        "networkStreamingInterval": "2m",
+        "maxSniffingTimePerContainer": "24h",
+        "excludeNamespaces": "kubescape,kube-system,kube-public,kube-node-lease,kubeconfig,gmp-system,gmp-public",
+        "excludeLabels":null,
+        "exporters": {
+          "alertManagerExporterUrls":[],
+          "stdoutExporter":true,
+          "syslogExporterURL": ""
+        },
+        "excludeJsonPaths":null,
+        "ruleCooldown": {
+            "ruleCooldownDuration": "1h",
+            "ruleCooldownAfterCount": 1,
+            "ruleCooldownOnProfileFailure": true,
+            "ruleCooldownMaxSize": 20000
+        },
+        "alertDeduplication": {
+            "bypass": false
+        }
+    }
+---
+# Source: kubescape-operator/templates/operator/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: operator
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: operator
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: operator
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+data:
+  config.json: |
+    {
+      "excludeNamespaces": "kubescape,kube-system,kube-public,kube-node-lease,kubeconfig,gmp-system,gmp-public",
+      "namespace": "kubescape",
+      "triggersecurityframework": true,
+      "podScanGuardTime": "1h",
+      "excludeJsonPaths":null,
+      "nodeAgentAutoscaler": {
+        "enabled": false,
+        "nodeGroupLabel": "node.kubernetes.io/instance-type",
+        "resourcePercentages": {
+          "requestCPU": 2,
+          "requestMemory": 2,
+          "limitCPU": 5,
+          "limitMemory": 5
+        },
+        "minResources": {
+          "cpu": "100m",
+          "memory": "600Mi"
+        },
+        "maxResources": {
+          "cpu": "2000m",
+          "memory": "4Gi"
+        },
+        "reconcileInterval": "5m",
+        "templatePath": "/etc/templates/daemonset-template.yaml",
+        "operatorDeploymentName": "operator",
+        "goMemLimitPercentage": 0.8
+      }
+    }
+---
+# Source: kubescape-operator/templates/operator/ks-recurring-cronjob-configmap.yaml
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: kubescape-cronjob-template
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: ks-cloud-config
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: ks-cloud-config
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+data:
+  cronjobTemplate: |-
+    apiVersion: batch/v1
+    kind: CronJob
+    metadata:
+      name: kubescape-scheduler
+      namespace: kubescape
+      labels:
+        app: kubescape-scheduler
+        tier: ks-control-plane
+        kubescape.io/tier: "core"
+        armo.tier: "kubescape-scan"
+    spec:
+      schedule: "0 8 * * *"
+      successfulJobsHistoryLimit: 3
+      failedJobsHistoryLimit: 1
+      jobTemplate:
+        spec:
+          template:
+            metadata:
+              labels:
+                armo.tier: "kubescape-scan"
+                kubescape.io/tier: "core"
+            spec:
+              securityContext:
+                seccompProfile:
+                  type: RuntimeDefault
+              containers:
+              - name: kubescape-scheduler
+                image: "quay.io/kubescape/http-request:v0.2.20"
+                imagePullPolicy: IfNotPresent
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  readOnlyRootFilesystem: true
+                  runAsNonRoot: true
+                  runAsUser: 100
+                resources:
+                  limits:
+                    cpu: 10m
+                    memory: 20Mi
+                  requests:
+                    cpu: 1m
+                    memory: 10Mi
+                args:
+                  - -method=post
+                  - -scheme=http
+                  - -host=operator:4002
+                  - -path=v1/triggerAction
+                  - -headers=Content-Type:application/json
+                  - -path-body=/home/ks/request-body.json
+                volumeMounts:
+                  - name: "request-body-volume"
+                    mountPath: /home/ks/request-body.json
+                    subPath: request-body.json
+                    readOnly: true
+              restartPolicy: Never
+              serviceAccountName: kubescape
+              automountServiceAccountToken: false
+              nodeSelector:
+                kubernetes.io/os: linux
+              affinity:
+              tolerations:
+              volumes:
+                - name: "request-body-volume" # placeholder
+                  configMap:
+                    name: kubescape-scheduler
+---
+# Source: kubescape-operator/templates/operator/kv-recurring-cronjob-configmap.yaml
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: kubevuln-cronjob-template # TODO: update template name
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: ks-cloud-config
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: ks-cloud-config
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+data:
+  cronjobTemplate: |-
+    apiVersion: batch/v1
+    kind: CronJob
+    metadata:
+      name: kubevuln-scheduler
+      namespace: kubescape
+      labels:
+        app: kubevuln-scheduler
+        tier: ks-control-plane
+        kubescape.io/tier: "core"
+        armo.tier: "vuln-scan"
+    spec:
+      schedule: "0 0 * * *"
+      successfulJobsHistoryLimit: 3
+      failedJobsHistoryLimit: 1
+      jobTemplate:
+        spec:
+          template:
+            metadata:
+              labels:
+                armo.tier: "vuln-scan"
+                kubescape.io/tier: "core"
+            spec:
+              securityContext:
+                seccompProfile:
+                  type: RuntimeDefault
+              containers:
+              - name: kubevuln-scheduler
+                image: "quay.io/kubescape/http-request:v0.2.20"
+                imagePullPolicy: IfNotPresent
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  readOnlyRootFilesystem: true
+                  runAsNonRoot: true
+                  runAsUser: 100
+                resources:
+                  limits:
+                    cpu: 10m
+                    memory: 20Mi
+                  requests:
+                    cpu: 1m
+                    memory: 10Mi
+                args:
+                  - -method=post
+                  - -scheme=http
+                  - -host=operator:4002
+                  - -path=v1/triggerAction
+                  - -headers=Content-Type:application/json
+                  - -path-body=/home/ks/request-body.json
+                volumeMounts:
+                  - name: "request-body-volume"
+                    mountPath: /home/ks/request-body.json
+                    subPath: request-body.json
+                    readOnly: true
+              restartPolicy: Never
+              serviceAccountName: kubevuln
+              automountServiceAccountToken: false
+              nodeSelector:
+                kubernetes.io/os: linux
+              affinity:
+              tolerations:
+              volumes:
+                - name: "request-body-volume" # placeholder
+                  configMap:
+                    name: kubevuln-scheduler
+---
+# Source: kubescape-operator/templates/operator/registry-scan-recurring-cronjob-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: ks-cloud-config
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: ks-cloud-config
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+  name: registry-scan-cronjob-template
+data:
+  cronjobTemplate: |-
+    apiVersion: batch/v1
+    kind: CronJob
+    metadata:
+      name: registry-scheduler
+      namespace: kubescape
+      labels:
+        app: registry-scheduler
+        kubescape.io/tier: "core"
+        tier: ks-control-plane
+        armo.tier: "registry-scan"
+    spec:
+      schedule: "0 0 * * *"
+      successfulJobsHistoryLimit: 3
+      failedJobsHistoryLimit: 1
+      jobTemplate:
+        spec:
+          template:
+            metadata:
+              labels:
+                armo.tier: "registry-scan"
+                kubescape.io/tier: "core"
+            spec:
+              securityContext:
+                seccompProfile:
+                  type: RuntimeDefault
+              containers:
+              - name: registry-scheduler
+                image: "quay.io/kubescape/http-request:v0.2.20"
+                imagePullPolicy: IfNotPresent
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  readOnlyRootFilesystem: true
+                  runAsNonRoot: true
+                  runAsUser: 100
+                resources:
+                  limits:
+                    cpu: 10m
+                    memory: 20Mi
+                  requests:
+                    cpu: 1m
+                    memory: 10Mi
+                args:
+                  - -method=post
+                  - -scheme=http
+                  - -host=operator:4002
+                  - -path=v1/triggerAction
+                  - -headers=Content-Type:application/json
+                  - -path-body=/home/ks/request-body.json
+                volumeMounts:
+                  - name: "request-body-volume"
+                    mountPath: /home/ks/request-body.json
+                    subPath: request-body.json
+                    readOnly: true
+              restartPolicy: Never
+              serviceAccountName: kubevuln
+              automountServiceAccountToken: false
+              nodeSelector:
+                kubernetes.io/os: linux
+              affinity:
+              tolerations:
+              volumes:
+                - name: "request-body-volume" # placeholder
+                  configMap:
+                    name: registry-scheduler
+---
+# Source: kubescape-operator/templates/storage/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: storage
+  namespace: kubescape
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: storage
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+data:
+  config.json: |
+    {
+      "cleanupInterval": "6h",
+      "disableVirtualCRDs": false,
+      "disableSeccompProfileEndpoint": true,
+      "excludeJsonPaths": null,
+      "defaultQueueLength": 100,
+      "defaultWorkerCount": 2,
+      "defaultMaxObjectSize": 400000,
+      "queueManagerEnabled": true,
+      "kindQueues": {"applicationprofiles":{"maxObjectSize":20000000,"queueLength":50,"workerCount":2},"containerprofiles":{"maxObjectSize":2500000,"queueLength":50,"workerCount":2},"networkneighborhoods":{"maxObjectSize":10000000,"queueLength":50,"workerCount":2},"openvulnerabilityexchangecontainers":{"maxObjectSize":500000,"queueLength":50,"workerCount":1},"sbomsyftfiltereds":{"maxObjectSize":50000000,"queueLength":50,"workerCount":1},"sbomsyfts":{"maxObjectSize":100000000,"queueLength":50,"workerCount":1},"vulnerabilitymanifests":{"maxObjectSize":50000000,"queueLength":50,"workerCount":1}},
+      "tlsClientCaFile": "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
+      "tlsServerCertFile": "/etc/storage-ca-certificates/tls.crt",
+      "tlsServerKeyFile": "/etc/storage-ca-certificates/tls.key",
+      "serverBindPort": "8443"
+    }
+---
+# Source: kubescape-operator/templates/storage/pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kubescape-storage
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: storage
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+# Source: kubescape-operator/templates/node-agent-crds/cloudproviderinfo-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: cloudproviderinfos.hostdata.kubescape.cloud
+spec:
+  group: hostdata.kubescape.cloud
+  names:
+    kind: CloudProviderInfo
+    listKind: CloudProviderInfoList
+    plural: cloudproviderinfos
+    singular: cloudproviderinfo
+  scope: Cluster
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+    additionalPrinterColumns:
+    - name: Node
+      type: string
+      jsonPath: .spec.nodeName
+    - name: Last Sensed
+      type: string
+      jsonPath: .status.lastSensed
+---
+# Source: kubescape-operator/templates/node-agent-crds/cniinfo-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: cniinfos.hostdata.kubescape.cloud
+spec:
+  group: hostdata.kubescape.cloud
+  names:
+    kind: CNIInfo
+    listKind: CNIInfoList
+    plural: cniinfos
+    singular: cniinfo
+  scope: Cluster
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+    additionalPrinterColumns:
+    - name: Node
+      type: string
+      jsonPath: .spec.nodeName
+    - name: Last Sensed
+      type: string
+      jsonPath: .status.lastSensed
+---
+# Source: kubescape-operator/templates/node-agent-crds/controlplaneinfo-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: controlplaneinfos.hostdata.kubescape.cloud
+spec:
+  group: hostdata.kubescape.cloud
+  names:
+    kind: ControlPlaneInfo
+    listKind: ControlPlaneInfoList
+    plural: controlplaneinfos
+    singular: controlplaneinfo
+  scope: Cluster
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+    additionalPrinterColumns:
+    - name: Node
+      type: string
+      jsonPath: .spec.nodeName
+    - name: Last Sensed
+      type: string
+      jsonPath: .status.lastSensed
+---
+# Source: kubescape-operator/templates/node-agent-crds/kernelversion-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: kernelversions.hostdata.kubescape.cloud
+spec:
+  group: hostdata.kubescape.cloud
+  names:
+    kind: KernelVersion
+    listKind: KernelVersionList
+    plural: kernelversions
+    singular: kernelversion
+  scope: Cluster
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+    additionalPrinterColumns:
+    - name: Node
+      type: string
+      jsonPath: .spec.nodeName
+    - name: Last Sensed
+      type: string
+      jsonPath: .status.lastSensed
+---
+# Source: kubescape-operator/templates/node-agent-crds/kubeletinfo-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: kubeletinfos.hostdata.kubescape.cloud
+spec:
+  group: hostdata.kubescape.cloud
+  names:
+    kind: KubeletInfo
+    listKind: KubeletInfoList
+    plural: kubeletinfos
+    singular: kubeletinfo
+  scope: Cluster
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+    additionalPrinterColumns:
+    - name: Node
+      type: string
+      jsonPath: .spec.nodeName
+    - name: Last Sensed
+      type: string
+      jsonPath: .status.lastSensed
+---
+# Source: kubescape-operator/templates/node-agent-crds/kubeproxyinfo-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: kubeproxyinfos.hostdata.kubescape.cloud
+spec:
+  group: hostdata.kubescape.cloud
+  names:
+    kind: KubeProxyInfo
+    listKind: KubeProxyInfoList
+    plural: kubeproxyinfos
+    singular: kubeproxyinfo
+  scope: Cluster
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+    additionalPrinterColumns:
+    - name: Node
+      type: string
+      jsonPath: .spec.nodeName
+    - name: Last Sensed
+      type: string
+      jsonPath: .status.lastSensed
+---
+# Source: kubescape-operator/templates/node-agent-crds/linuxkernelvariables-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: linuxkernelvariables.hostdata.kubescape.cloud
+spec:
+  group: hostdata.kubescape.cloud
+  names:
+    kind: LinuxKernelVariables
+    listKind: LinuxKernelVariablesList
+    plural: linuxkernelvariables
+    singular: linuxkernelvariable
+  scope: Cluster
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+    additionalPrinterColumns:
+    - name: Node
+      type: string
+      jsonPath: .spec.nodeName
+    - name: Last Sensed
+      type: string
+      jsonPath: .status.lastSensed
+---
+# Source: kubescape-operator/templates/node-agent-crds/linuxsecurityhardening-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: linuxsecurityhardeningstatuses.hostdata.kubescape.cloud
+spec:
+  group: hostdata.kubescape.cloud
+  names:
+    kind: LinuxSecurityHardeningStatus
+    listKind: LinuxSecurityHardeningStatusList
+    plural: linuxsecurityhardeningstatuses
+    singular: linuxsecurityhardeningstatus
+  scope: Cluster
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+    additionalPrinterColumns:
+    - name: Node
+      type: string
+      jsonPath: .spec.nodeName
+    - name: Last Sensed
+      type: string
+      jsonPath: .status.lastSensed
+---
+# Source: kubescape-operator/templates/node-agent-crds/openports-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: openportslists.hostdata.kubescape.cloud
+spec:
+  group: hostdata.kubescape.cloud
+  names:
+    kind: OpenPortsList
+    listKind: OpenPortsListList
+    plural: openportslists
+    singular: openportslist
+  scope: Cluster
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+    additionalPrinterColumns:
+    - name: Node
+      type: string
+      jsonPath: .spec.nodeName
+    - name: Last Sensed
+      type: string
+      jsonPath: .status.lastSensed
+---
+# Source: kubescape-operator/templates/node-agent-crds/osreleasefile-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: osreleasefiles.hostdata.kubescape.cloud
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.11.1
+spec:
+  group: hostdata.kubescape.cloud
+  names:
+    kind: OsReleaseFile
+    listKind: OsReleaseFileList
+    plural: osreleasefiles
+    singular: osreleasefile
+  scope: Cluster
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        description: OsReleaseFile contains the OS release information from a node
+        type: object
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation of an object.'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this object represents.'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: OsReleaseFileSpec contains the actual OS release file content
+            type: object
+            properties:
+              content:
+                description: Content is the raw content of the OS release file
+                type: string
+              nodeName:
+                description: NodeName is the name of the node this data came from
+                type: string
+          status:
+            description: OsReleaseFileStatus contains status information about the sensing
+            type: object
+            properties:
+              lastSensed:
+                description: LastSensed is the timestamp when this data was last collected
+                type: string
+                format: date-time
+              error:
+                description: Error contains any error message from the last sensing attempt
+                type: string
+    additionalPrinterColumns:
+    - name: Node
+      type: string
+      jsonPath: .spec.nodeName
+    - name: Last Sensed
+      type: string
+      jsonPath: .status.lastSensed
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+---
+# Source: kubescape-operator/templates/storage/seccompprofile-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: seccompprofiles.kubescape.io
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: seccompprofile
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: seccompprofile
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+spec:
+  group: kubescape.io
+  names:
+    plural: seccompprofiles
+    singular: seccompprofile
+    kind: SeccompProfile
+    listKind: SeccompProfileList
+    shortNames:
+      - scp
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              properties:
+                containers:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                        description: "Name of the container"
+                      path:
+                        type: string
+                        description: "Path to the seccomp profile"
+                      spec:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                        properties:
+                          disabled:
+                            type: boolean
+                            description: "Whether the profile is disabled"
+                          baseProfileName:
+                            type: string
+                            description: "Name of base profile to union into this profile"
+                          defaultAction:
+                            type: string
+                            description: "The default action for seccomp"
+                          architectures:
+                            type: array
+                            items:
+                              type: string
+                            description: "The architecture used for system calls"
+                          listenerPath:
+                            type: string
+                            description: "Path of UNIX domain socket to contact a seccomp agent"
+                          listenerMetadata:
+                            type: string
+                            description: "Opaque data to pass to the seccomp agent"
+                          syscalls:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                names:
+                                  type: array
+                                  items:
+                                    type: string
+                                  description: "The names of the syscalls"
+                                action:
+                                  type: string
+                                  description: "The action for seccomp rules"
+                                errnoRet:
+                                  type: integer
+                                  format: int64
+                                  description: "The errno return code to use"
+                                args:
+                                  type: array
+                                  items:
+                                    type: object
+                                    properties:
+                                      index:
+                                        type: integer
+                                        format: int64
+                                        description: "The index for syscall arguments"
+                                      value:
+                                        type: integer
+                                        format: int64
+                                        description: "The value for syscall arguments"
+                                      valueTwo:
+                                        type: integer
+                                        format: int64
+                                        description: "The second value for syscall arguments"
+                                      op:
+                                        type: string
+                                        description: "The operator for syscall arguments"
+                          flags:
+                            type: array
+                            items:
+                              type: string
+                            description: "List of flags to use with seccomp(2)"
+                initContainers:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                        description: "Name of the init container"
+                      path:
+                        type: string
+                        description: "Path to the seccomp profile"
+                      spec:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                        properties:
+                          disabled:
+                            type: boolean
+                            description: "Whether the profile is disabled"
+                          baseProfileName:
+                            type: string
+                            description: "Name of base profile to union into this profile"
+                          defaultAction:
+                            type: string
+                            description: "The default action for seccomp"
+                          architectures:
+                            type: array
+                            items:
+                              type: string
+                            description: "The architecture used for system calls"
+                          listenerPath:
+                            type: string
+                            description: "Path of UNIX domain socket to contact a seccomp agent"
+                          listenerMetadata:
+                            type: string
+                            description: "Opaque data to pass to the seccomp agent"
+                          syscalls:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                names:
+                                  type: array
+                                  items:
+                                    type: string
+                                  description: "The names of the syscalls"
+                                action:
+                                  type: string
+                                  description: "The action for seccomp rules"
+                                errnoRet:
+                                  type: integer
+                                  format: int64
+                                  description: "The errno return code to use"
+                                args:
+                                  type: array
+                                  items:
+                                    type: object
+                                    properties:
+                                      index:
+                                        type: integer
+                                        format: int64
+                                        description: "The index for syscall arguments"
+                                      value:
+                                        type: integer
+                                        format: int64
+                                        description: "The value for syscall arguments"
+                                      valueTwo:
+                                        type: integer
+                                        format: int64
+                                        description: "The second value for syscall arguments"
+                                      op:
+                                        type: string
+                                        description: "The operator for syscall arguments"
+                          flags:
+                            type: array
+                            items:
+                              type: string
+                            description: "List of flags to use with seccomp(2)"
+                ephemeralContainers:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                        description: "Name of the ephemeral container"
+                      path:
+                        type: string
+                        description: "Path to the seccomp profile"
+                      spec:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                        properties:
+                          disabled:
+                            type: boolean
+                            description: "Whether the profile is disabled"
+                          baseProfileName:
+                            type: string
+                            description: "Name of base profile to union into this profile"
+                          defaultAction:
+                            type: string
+                            description: "The default action for seccomp"
+                          architectures:
+                            type: array
+                            items:
+                              type: string
+                            description: "The architecture used for system calls"
+                          listenerPath:
+                            type: string
+                            description: "Path of UNIX domain socket to contact a seccomp agent"
+                          listenerMetadata:
+                            type: string
+                            description: "Opaque data to pass to the seccomp agent"
+                          syscalls:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                names:
+                                  type: array
+                                  items:
+                                    type: string
+                                  description: "The names of the syscalls"
+                                action:
+                                  type: string
+                                  description: "The action for seccomp rules"
+                                errnoRet:
+                                  type: integer
+                                  format: int64
+                                  description: "The errno return code to use"
+                                args:
+                                  type: array
+                                  items:
+                                    type: object
+                                    properties:
+                                      index:
+                                        type: integer
+                                        format: int64
+                                        description: "The index for syscall arguments"
+                                      value:
+                                        type: integer
+                                        format: int64
+                                        description: "The value for syscall arguments"
+                                      valueTwo:
+                                        type: integer
+                                        format: int64
+                                        description: "The second value for syscall arguments"
+                                      op:
+                                        type: string
+                                        description: "The operator for syscall arguments"
+                          flags:
+                            type: array
+                            items:
+                              type: string
+                            description: "List of flags to use with seccomp(2)"
+            status:
+              type: object
+              properties:
+                containers:
+                  type: object
+                  additionalProperties:
+                    type: object
+                    properties:
+                      conditions:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            type:
+                              type: string
+                              description: "Type of this condition"
+                            status:
+                              type: string
+                              description: "Status of this condition (True, False, Unknown)"
+                            lastTransitionTime:
+                              type: string
+                              format: date-time
+                              description: "Last time this condition transitioned"
+                            reason:
+                              type: string
+                              description: "Reason for this condition's last transition"
+                            message:
+                              type: string
+                              description: "Message about this condition's last transition"
+                      status:
+                        type: string
+                        description: "Profile state"
+                      path:
+                        type: string
+                        description: "Path to the seccomp profile"
+                      activeWorkloads:
+                        type: array
+                        items:
+                          type: string
+                        description: "Active workloads using this profile"
+                      localhostProfile:
+                        type: string
+                        description: "Path for securityContext.seccompProfile.localhostProfile"
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+---
+# Source: kubescape-operator/templates/kubescape/clusterrole.yaml
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: kubescape
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: kubescape
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/proxy", "namespaces", "nodes", "configmaps", "services", "serviceaccounts", "endpoints", "persistentvolumeclaims", "persistentvolumes", "limitranges", "replicationcontrollers", "podtemplates", "resourcequotas", "events"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["admissionregistration.k8s.io"]
+  resources: ["mutatingwebhookconfigurations", "validatingwebhookconfigurations"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["apiregistration.k8s.io"]
+  resources: ["apiservices"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets", "daemonsets", "replicasets", "controllerrevisions"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["autoscaling"]
+  resources: ["horizontalpodautoscalers"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["discovery.k8s.io"]
+  resources: ["endpointslices"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["events.k8s.io"]
+  resources: ["events"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["hostdata.kubescape.cloud"]
+  resources: ["APIServerInfo", "ControlPlaneInfo"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["networkpolicies", "Ingress"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["cilium.io"]
+  resources: ["ciliumnetworkpolicies", "ciliumclusterwidenetworkpolicies"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["projectcalico.org"]
+  resources: ["networkpolicies"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["networking.istio.io"]
+  resources: ["gateways", "virtualservices"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["security.istio.io"]
+  resources: ["authorizationpolicies"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["policy"]
+  resources: ["poddisruptionbudgets", "podsecuritypolicies", "PodSecurityPolicy"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["clusterroles", "clusterrolebindings", "roles", "rolebindings"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["storage.k8s.io"]
+  resources: ["csistoragecapacities", "storageclasses"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["ingresses"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["extensions"]
+  resources: ["Ingress"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["gateway.networking.k8s.io"]
+  resources: ["httproutes","gateways","gatewayclasses","tcproutes","tlsroutes","udproutes"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["update"]
+- apiGroups: ["spdx.softwarecomposition.kubescape.io"]
+  resources: ["workloadconfigurationscans", "workloadconfigurationscansummaries"]
+  verbs: ["create", "get", "update", "patch"]
+- apiGroups: ["kubescape.io"]
+  resources: ["servicesscanresults"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["hostdata.kubescape.cloud"]
+  resources:
+    - osreleasefiles
+    - kernelversions
+    - linuxsecurityhardeningstatuses
+    - openportslists
+    - linuxkernelvariables
+    - kubeletinfos
+    - kubeproxyinfos
+    - controlplaneinfos
+    - cloudproviderinfos
+    - cniinfos
+  verbs: ["get", "list", "watch"]
+---
+# Source: kubescape-operator/templates/kubevuln/clusterrole.yaml
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: kubevuln
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: kubevuln
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: kubevuln
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+rules:
+  - apiGroups: ["spdx.softwarecomposition.kubescape.io"]
+    resources: ["vulnerabilitymanifests", "vulnerabilitymanifestsummaries", "openvulnerabilityexchangecontainers", "sbomsyfts", "sbomsyftfiltereds"]
+    verbs: ["create", "get", "update", "watch", "list", "patch"]
+  - apiGroups: ["spdx.softwarecomposition.kubescape.io"]
+    resources: ["containerprofiles"]
+    verbs: ["get", "watch", "list"]
+---
+# Source: kubescape-operator/templates/node-agent/clusterrole.yaml
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: node-agent
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: node-agent
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: node-agent
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "nodes/proxy", "services", "endpoints", "namespaces", "configmaps"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "watch", "list", "delete"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "daemonsets", "statefulsets", "replicasets"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["spdx.softwarecomposition.kubescape.io"]
+  resources: ["applicationprofiles", "networkneighborhoods"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["kubescape.io"]
+  resources: ["seccompprofiles"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["spdx.softwarecomposition.kubescape.io"]
+  resources: ["containerprofiles", "sbomsyfts"]
+  verbs: ["create", "get", "update", "watch", "list", "patch"]
+- apiGroups: ["kubescape.io"]
+  resources: ["runtimerulealertbindings"]
+  verbs: ["list", "watch"]
+- apiGroups: ["kubescape.io"]
+  resources: ["operatorcommands"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["kubescape.io"]
+  resources: ["operatorcommands/status"]
+  verbs: ["get", "watch", "list", "update", "patch"]
+- apiGroups: ["events.k8s.io"]
+  resources: ["events"]
+  verbs: ["create", "patch", "get"]
+- apiGroups: ["kubescape.io"]
+  resources: ["rules"]
+  verbs: ["list", "watch"]
+- apiGroups: ["hostdata.kubescape.cloud"]
+  resources:
+    - osreleasefiles
+    - kernelversions
+    - linuxsecurityhardeningstatuses
+    - openportslists
+    - linuxkernelvariables
+    - kubeletinfos
+    - kubeproxyinfos
+    - controlplaneinfos
+    - cloudproviderinfos
+    - cniinfos
+  verbs: ["create", "get", "update", "patch", "list", "watch"]
+---
+# Source: kubescape-operator/templates/operator/clusterrole.yaml
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: operator
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: operator
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: operator
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "namespaces", "configmaps", "services"]
+    verbs: ["get", "watch", "list"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "watch", "list"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "watch", "list", "create", "update", "delete" ,"patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "daemonsets", "statefulsets", "replicasets"]
+    verbs: ["get", "watch", "list"]
+  - apiGroups: ["spdx.softwarecomposition.kubescape.io"]
+    resources: ["vulnerabilitymanifests", "vulnerabilitymanifestsummaries", "workloadconfigurationscans", "workloadconfigurationscansummaries", "openvulnerabilityexchangecontainers", "containerprofiles", "sbomsyfts"]
+    verbs: ["get", "watch", "list", "delete"]
+  - apiGroups: ["kubescape.io"]
+    resources: ["runtimerulealertbindings", "rules"]
+    verbs: ["list", "watch", "get"]
+  - apiGroups: ["kubescape.io"]
+    resources: ["servicesscanresults"]
+    verbs: ["get", "watch", "list", "create", "update", "delete" ,"patch"]
+  - apiGroups: ["kubescape.io"]
+    resources: ["operatorcommands"]
+    verbs: ["get", "watch", "list", "create", "update", "patch"]
+  - apiGroups: ["kubescape.io"]
+    resources: ["operatorcommands/status"]
+    verbs: ["get", "watch", "list", "update", "patch"]
+---
+# Source: kubescape-operator/templates/storage/clusterrole.yaml
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: storage
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: storage
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+rules:
+- apiGroups: [""]
+  resources: ["namespaces", "pods", "services"]
+  verbs: [ "get", "watch", "list" ]
+- apiGroups: [ "admissionregistration.k8s.io" ]
+  resources: [ "mutatingwebhookconfigurations", "validatingwebhookconfigurations" ]
+  verbs: [ "get", "watch", "list" ]
+- apiGroups: ["apps"]
+  resources: ["daemonsets", "deployments", "replicasets", "statefulsets"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["batch"]
+  resources: ["cronjobs", "jobs"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["flowcontrol.apiserver.k8s.io"]
+  resources: ["prioritylevelconfigurations", "flowschemas"]
+  verbs: ["get", "watch", "list"]
+---
+# Source: kubescape-operator/templates/kubescape/clusterrolebinding.yaml
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: kubescape
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: kubescape
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubescape
+subjects:
+- kind: ServiceAccount
+  name: kubescape
+  namespace: kubescape
+---
+# Source: kubescape-operator/templates/kubevuln/clusterrolebinding.yaml
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: kubevuln
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: kubevuln
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: kubevuln
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubevuln
+subjects:
+- kind: ServiceAccount
+  name: kubevuln
+  namespace: kubescape
+---
+# Source: kubescape-operator/templates/node-agent/clusterrolebinding.yaml
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: node-agent
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: node-agent
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: node-agent
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+subjects:
+- kind: ServiceAccount
+  name: node-agent
+  namespace: kubescape
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: node-agent
+---
+# Source: kubescape-operator/templates/operator/clusterrolebinding.yaml
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: operator
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: operator
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: operator
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+subjects:
+- kind: ServiceAccount
+  name: operator
+  namespace: kubescape
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: operator
+---
+# Source: kubescape-operator/templates/storage/clusterrolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: "storage:system:auth-delegator"
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: storage
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+- kind: ServiceAccount
+  name: storage
+  namespace: kubescape
+---
+# Source: kubescape-operator/templates/storage/clusterrolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: storage
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: storage
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: storage
+subjects:
+  - kind: ServiceAccount
+    name: storage
+    namespace: kubescape
+---
+# Source: kubescape-operator/templates/kubescape/role.yaml
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: kubescape
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: kubescape
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: kubescape
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+rules:
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    verbs: ["create", "get", "update", "watch", "list", "patch", "delete"]
+---
+# Source: kubescape-operator/templates/operator/role.yaml
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: operator
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: operator
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: operator
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["create", "get", "update", "watch", "list", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["create", "get", "update", "watch", "list", "patch", "delete"]
+---
+# Source: kubescape-operator/templates/kubescape/rolebinding.yaml
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: kubescape
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: kubescape
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: kubescape
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kubescape
+subjects:
+- kind: ServiceAccount
+  name: kubescape
+  namespace: kubescape
+---
+# Source: kubescape-operator/templates/operator/rolebinding.yaml
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: operator
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: operator
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: operator
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: operator
+subjects:
+- kind: ServiceAccount
+  name: operator
+  namespace: kubescape
+---
+# Source: kubescape-operator/templates/storage/rolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: "storage-auth-reader"
+  namespace: kube-system
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: storage
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  # This is a default role name provided by K8s and should not be templated or changed
+  name: "extension-apiserver-authentication-reader"
+subjects:
+- kind: ServiceAccount
+  name: storage
+  namespace: kubescape
+---
+# Source: kubescape-operator/templates/kubescape/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubescape
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: kubescape
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: kubescape
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+  selector:
+      app.kubernetes.io/name: kubescape-operator
+      app.kubernetes.io/instance: kubescape
+      app.kubernetes.io/component: kubescape
+---
+# Source: kubescape-operator/templates/kubevuln/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubevuln
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: kubevuln
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: kubevuln
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: kubevuln
+---
+# Source: kubescape-operator/templates/node-agent/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-agent
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: node-agent
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: node-agent
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+spec:
+  ports:
+  - name: prometheus
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: node-agent
+---
+# Source: kubescape-operator/templates/operator/admission-webhook/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubescape-admission-webhook
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: operator
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: operator
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+spec:
+  ports:
+    - port: 443
+      targetPort: 8443
+  selector:
+      app.kubernetes.io/name: kubescape-operator
+      app.kubernetes.io/instance: kubescape
+      app.kubernetes.io/component: operator
+  type: ClusterIP
+---
+# Source: kubescape-operator/templates/operator/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: operator
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: operator
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: operator
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+spec:
+  type: ClusterIP
+  ports:
+    - port: 4002
+      targetPort: 4002
+      protocol: TCP
+  selector:
+      app.kubernetes.io/name: kubescape-operator
+      app.kubernetes.io/instance: kubescape
+      app.kubernetes.io/component: operator
+---
+# Source: kubescape-operator/templates/storage/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: storage
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: storage
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 443
+    protocol: TCP
+    targetPort: 8443
+    name: https
+  selector:
+      app.kubernetes.io/name: kubescape-operator
+      app.kubernetes.io/instance: kubescape
+      app.kubernetes.io/component: storage
+---
+# Source: kubescape-operator/templates/node-agent/daemonset.yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-agent
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: node-agent
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: node-agent
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubescape-operator
+      app.kubernetes.io/instance: kubescape
+      app.kubernetes.io/component: node-agent
+  template:
+    metadata:
+      annotations:
+        
+        checksum/node-agent-config: a155afd92874af39f3f0b7899f1c6594e73931bb6b5c94f22ec10dd134a4844a
+        checksum/cloud-secret: 192498af36fa8b505f01b472407fcc09b948e1259f80663d34f3f3885cdf0d25
+        checksum/cloud-config: 2ddf2ee6c8a2caf8f640d4b43596f4e846123b1449276ce68213540a85ca0977
+      labels:
+        helm.sh/chart: kubescape-operator-1.40.3
+        app.kubernetes.io/name: kubescape-operator
+        app.kubernetes.io/instance: kubescape
+        app.kubernetes.io/component: node-agent
+        app.kubernetes.io/version: "1.40.3"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: kubescape
+        app: node-agent
+        tier: ks-control-plane
+        kubescape.io/ignore: "true"
+        kubescape.io/tier: "core"
+    spec:
+      securityContext:
+        appArmorProfile:
+          type: Unconfined
+      priorityClassName: kubescape-critical
+      serviceAccountName: node-agent
+      automountServiceAccountToken: true
+      hostPID: true
+      volumes:
+      
+      - hostPath:
+          path: /
+        name: host
+      - hostPath:
+          path: /var/lib/kubelet
+        name: kubeletdir
+      - hostPath:
+          path: /run
+        name: run
+      - hostPath:
+          path: /var
+        name: var
+      - hostPath:
+          path: /sys/fs/cgroup
+        name: cgroup
+      - hostPath:
+          path: /lib/modules
+        name: modules
+      - hostPath:
+          path: /sys/fs/bpf
+        name: bpffs
+      - hostPath:
+          path: /sys/kernel/debug
+        name: debugfs
+      - hostPath:
+          path: /boot
+        name: boot
+      - emptyDir: null
+        name: data
+      - emptyDir: null
+        name: profiles
+      - hostPath:
+          path: /
+          type: Directory
+        name: host-filesystem
+      - emptyDir: {}
+        name: clamdb
+      - emptyDir: {}
+        name: clamrun
+      - configMap:
+          items:
+          - key: clamd.conf
+            path: clamd.conf
+          - key: freshclam.conf
+            path: freshclam.conf
+          name: clamav
+        name: etc
+      - name: cloud-secret
+        secret:
+          secretName: cloud-secret
+      - name: ks-cloud-config
+        configMap:
+          name: ks-cloud-config
+          items:
+            - key: "clusterData"
+              path: "clusterData.json"
+      - name: config
+        configMap:
+          name: node-agent
+          items:
+            - key: "config.json"
+              path: "config.json"
+      containers:
+      
+      
+      
+      
+      
+      - name: node-agent
+        image: "quay.io/kubescape/node-agent:v0.3.158"
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          httpGet:
+            path: /livez
+            port: 7888
+          periodSeconds: 3
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 7888
+          periodSeconds: 3
+        startupProbe:
+          httpGet:
+            path: /readyz
+            port: 7888
+          periodSeconds: 10
+          failureThreshold: 30
+          timeoutSeconds: 1
+        resources:
+          
+          limits:
+            cpu: 500m
+            memory: 1400Mi
+          requests:
+            cpu: 100m
+            memory: 180Mi
+        env:
+          
+          - name: GOMEMLIMIT
+            value: "1120MiB"
+          - name: HOST_ROOT
+            value: "/host"
+          - name: KS_LOGGER_LEVEL
+            value: "info"
+          - name: KS_LOGGER_NAME
+            value: "zap"
+          - name: NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: NAMESPACE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: KUBELET_ROOT
+            value: "/var/lib/kubelet"
+          - name: AGENT_VERSION
+            value: "v0.3.158"
+          - name: NodeName
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+        securityContext:
+          runAsUser: 0
+          privileged: false
+          capabilities:
+            add:
+              - SYS_ADMIN
+              - SYS_PTRACE
+              - NET_ADMIN
+              - SYSLOG
+              - SYS_RESOURCE
+              - IPC_LOCK
+              - NET_RAW
+          seLinuxOptions:
+            type: spc_t
+        volumeMounts:
+          
+          - mountPath: /host
+            name: host
+            readOnly: true
+          - mountPath: /var/lib/kubelet
+            name: kubeletdir
+          - mountPath: /run
+            name: run
+          - mountPath: /var
+            name: var
+            readOnly: true
+          - mountPath: /lib/modules
+            name: modules
+            readOnly: true
+          - mountPath: /sys/kernel/debug
+            name: debugfs
+          - mountPath: /sys/fs/cgroup
+            name: cgroup
+            readOnly: true
+          - mountPath: /sys/fs/bpf
+            name: bpffs
+          - mountPath: /data
+            name: data
+          - mountPath: /profiles
+            name: profiles
+          - mountPath: /boot
+            name: boot
+            readOnly: true
+          - mountPath: /clamav
+            name: clamrun
+          - name: cloud-secret
+            mountPath: /etc/credentials
+            readOnly: true
+          - name: ks-cloud-config
+            mountPath: /etc/config/clusterData.json
+            readOnly: true
+            subPath: "clusterData.json"
+          - name: config
+            mountPath: /etc/config/config.json
+            readOnly: true
+            subPath: "config.json"
+      nodeSelector:
+      
+        kubernetes.io/os: linux
+      affinity:
+      
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/os
+                operator: In
+                values:
+                - linux
+      tolerations:
+---
+# Source: kubescape-operator/templates/kubescape/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubescape
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: kubescape
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: kubescape
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  strategy:
+    rollingUpdate:
+      maxSurge: 0%
+      maxUnavailable: 100%
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubescape-operator
+      app.kubernetes.io/instance: kubescape
+      app.kubernetes.io/component: kubescape
+  template:
+    metadata:
+      annotations:
+        
+        checksum/cloud-secret: 192498af36fa8b505f01b472407fcc09b948e1259f80663d34f3f3885cdf0d25
+        checksum/cloud-config: 2ddf2ee6c8a2caf8f640d4b43596f4e846123b1449276ce68213540a85ca0977
+      labels:
+        helm.sh/chart: kubescape-operator-1.40.3
+        app.kubernetes.io/name: kubescape-operator
+        app.kubernetes.io/instance: kubescape
+        app.kubernetes.io/component: kubescape
+        app.kubernetes.io/version: "1.40.3"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: kubescape
+        app: kubescape
+        tier: ks-control-plane
+        kubescape.io/ignore: "true"
+        kubescape.io/tier: "core"
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+        runAsUser: 65532
+        fsGroup: 65532
+      containers:
+      - name: kubescape
+        image: "quay.io/kubescape/kubescape:v4.0.11"
+        imagePullPolicy: "IfNotPresent"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false  # patched: chmod on /home/nonroot/.kubescape fails otherwise, see comment below
+          runAsNonRoot: true
+        ports:
+          - name: http
+            containerPort: 8080
+            protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /livez
+            port: 8080
+          initialDelaySeconds: 3
+          periodSeconds: 3
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8080
+          initialDelaySeconds: 3
+          periodSeconds: 3
+        env:
+        - name: GOMEMLIMIT
+          valueFrom:
+            resourceFieldRef:
+              resource: limits.memory
+              divisor: '1'
+        - name: KS_LOGGER_LEVEL
+          value: "info"
+        - name: KS_LOGGER_NAME
+          value: "zap"
+        - name: KS_DOWNLOAD_ARTIFACTS  # When set to true the artifacts will be downloaded every scan execution
+          value: "true"
+        - name: KS_DEFAULT_CONFIGMAP_NAME
+          value: "kubescape-config"
+        - name: KS_DEFAULT_CONFIGMAP_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: KS_CONTEXT
+          value: "default"
+        - name: KS_DEFAULT_CLOUD_CONFIGMAP_NAME
+          value: ks-cloud-config
+        - name: KS_ENABLE_HOST_SCANNER
+          value: "true"
+        - name: KS_SKIP_UPDATE_CHECK
+          value: "false"
+        - name: KS_HOST_SCAN_YAML
+          value: "/home/nonroot/.kubescape/host-scanner.yaml"
+        - name: LARGE_CLUSTER_SIZE
+          value: "1500"
+        - name: KS_EXCLUDE_NAMESPACES
+          value: "kubescape,kube-system,kube-public,kube-node-lease,kubeconfig,gmp-system,gmp-public"
+        command:
+        - ksserver
+        resources:
+              limits:
+                cpu: 600m
+                memory: 1Gi
+              requests:
+                cpu: 250m
+                memory: 400Mi
+        volumeMounts:
+        - name: cloud-secret
+          mountPath: /etc/credentials
+          readOnly: true
+        - name: kubescape-volume
+          mountPath: /home/nonroot/.kubescape
+          subPath: config.json
+        - name: host-scanner-definition
+          mountPath: /home/nonroot/.kubescape/host-scanner.yaml
+          subPath: host-scanner-yaml
+        - name: results
+          mountPath: /home/nonroot/results
+        - name: failed
+          mountPath: /home/nonroot/failed
+        - name: ks-cloud-config
+          mountPath: /etc/config/clusterData.json
+          readOnly: true
+          subPath: "clusterData.json"
+      volumes:
+      - name: cloud-secret
+        secret:
+          secretName: cloud-secret
+      - name: ks-cloud-config
+        configMap:
+          name: ks-cloud-config
+          items:
+          - key: "clusterData"
+            path: "clusterData.json"
+      - name: host-scanner-definition
+        configMap:
+          name: host-scanner-definition
+      - name: kubescape-volume
+        emptyDir: {}
+      - name: results
+        emptyDir: {}
+      - name: failed
+        emptyDir: {}
+      serviceAccountName: kubescape
+      automountServiceAccountToken: true
+      nodeSelector:
+        kubernetes.io/os: linux
+      affinity:
+      tolerations:
+---
+# Source: kubescape-operator/templates/kubevuln/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubevuln
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: kubevuln
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: kubevuln
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubescape-operator
+      app.kubernetes.io/instance: kubescape
+      app.kubernetes.io/component: kubevuln
+  template:
+    metadata:
+      annotations:
+        
+        checksum/cloud-secret: 192498af36fa8b505f01b472407fcc09b948e1259f80663d34f3f3885cdf0d25
+        checksum/cloud-config: 2ddf2ee6c8a2caf8f640d4b43596f4e846123b1449276ce68213540a85ca0977
+      labels:
+        helm.sh/chart: kubescape-operator-1.40.3
+        app.kubernetes.io/name: kubescape-operator
+        app.kubernetes.io/instance: kubescape
+        app.kubernetes.io/component: kubevuln
+        app.kubernetes.io/version: "1.40.3"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: kubescape
+        app: kubevuln
+        tier: ks-control-plane
+        kubescape.io/ignore: "true"
+        kubescape.io/tier: "core"
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+        runAsUser: 65532
+        fsGroup: 65532
+      containers:
+        - name: kubevuln
+          image: "quay.io/kubescape/kubevuln:v0.3.159"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          ports:
+          - containerPort: 8080
+            protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /v1/liveness
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /v1/readiness
+              port: 8080
+          resources:
+            limits:
+              cpu: 1500m
+              ephemeral-storage: 10Gi
+              memory: 5000Mi
+            requests:
+              cpu: 300m
+              ephemeral-storage: 5Gi
+              memory: 1000Mi
+          env:
+            - name: GOMEMLIMIT
+              value: "4000MiB"
+            - name: KS_LOGGER_LEVEL
+              value: "info"
+            - name: KS_LOGGER_NAME
+              value: "zap"
+            - name: PRINT_POST_JSON
+              value: ""
+            - name: CA_MAX_VULN_SCAN_ROUTINES
+              value: "1"
+          args:
+            - -alsologtostderr
+            - -v=4
+            - 2>&1
+          volumeMounts:
+            - name: cloud-secret
+              mountPath: /etc/credentials
+              readOnly: true
+            - name: tmp-dir
+              mountPath: /tmp
+            - name: grype-db-cache
+              mountPath: /home/nonroot/anchore-resources/db
+            - name: ks-cloud-config
+              mountPath: /etc/config/clusterData.json
+              readOnly: true
+              subPath: "clusterData.json"
+            - name: grype-db
+              mountPath: /home/nonroot/.cache/grype
+      volumes:
+        - name: cloud-secret
+          secret:
+            secretName: cloud-secret
+        - name: tmp-dir
+          emptyDir: {}
+        - name: grype-db-cache
+          emptyDir: {}
+        - name: ks-cloud-config
+          configMap:
+            name: ks-cloud-config
+            items:
+            - key: "clusterData"
+              path: "clusterData.json"
+        - name: "grype-db"
+          emptyDir: {}
+      serviceAccountName: kubevuln
+      automountServiceAccountToken: true
+      nodeSelector:
+        kubernetes.io/os: linux
+      affinity:
+      tolerations:
+---
+# Source: kubescape-operator/templates/operator/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: operator
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: operator
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: operator
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  strategy:
+    rollingUpdate:
+      maxSurge: 0%
+      maxUnavailable: 100%
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubescape-operator
+      app.kubernetes.io/instance: kubescape
+      app.kubernetes.io/component: operator
+  template:
+    metadata:
+      annotations:
+        
+        checksum/operator-config: 979468439f64547aa81c6410b8da45179ce4cb6fb3e2df631aaa1476c6b75866
+        checksum/cloud-secret: 192498af36fa8b505f01b472407fcc09b948e1259f80663d34f3f3885cdf0d25
+        checksum/cloud-config: 2ddf2ee6c8a2caf8f640d4b43596f4e846123b1449276ce68213540a85ca0977
+        checksum/capabilities-config: 66d20d7722514693a4f8dc61bb1b62011aed0aea519e4e5e5ffffd59a6739d98
+        checksum/matching-rules-config: 7732c83da6cd6962f78ef323206eba8810b7a4fa3f21d1608d9c083428a6eb8f
+      labels:
+        helm.sh/chart: kubescape-operator-1.40.3
+        app.kubernetes.io/name: kubescape-operator
+        app.kubernetes.io/instance: kubescape
+        app.kubernetes.io/component: operator
+        app.kubernetes.io/version: "1.40.3"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: kubescape
+        app: operator
+        tier: ks-control-plane
+        kubescape.io/ignore: "true"
+        kubescape.io/tier: "core"
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+        runAsUser: 65532
+        fsGroup: 65532
+      containers:
+        - name: operator
+          image: "quay.io/kubescape/operator:v0.2.159"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          ports:
+            - name: "trigger-port"
+              containerPort: 4002
+              protocol: TCP
+            - name: "readiness-port"
+              containerPort: 8000
+              protocol: TCP
+            - name: "admission-port"
+              containerPort: 8443
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /v1/liveness
+              port: readiness-port
+            initialDelaySeconds: 3
+            periodSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /v1/readiness
+              port: readiness-port
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            limits:
+              cpu: 300m
+              memory: 300Mi
+            requests:
+              cpu: 50m
+              memory: 100Mi
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: HELM_RELEASE
+              value: kubescape-operator-1.40.3
+            - name: GOMEMLIMIT
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.memory
+                  divisor: '1'
+            - name: KS_LOGGER_LEVEL
+              value: "info"
+            - name: KS_LOGGER_NAME
+              value: "zap"
+          volumeMounts:
+            - name: cloud-secret
+              mountPath: /etc/credentials
+              readOnly: true
+            - name: tmp-dir
+              mountPath: /tmp
+            - name: ks-cloud-config
+              mountPath: /etc/config/clusterData.json
+              readOnly: true
+              subPath: "clusterData.json"
+            - name: ks-capabilities
+              mountPath: /etc/config/capabilities.json
+              readOnly: true
+              subPath: "capabilities.json"
+            - name: cs-matching-rules
+              mountPath: /etc/config/matchingRules.json
+              readOnly: true
+              subPath: "matchingRules.json"
+            - name: config
+              mountPath: /etc/config/config.json
+              readOnly: true
+              subPath: "config.json"
+            - name: tls-certs
+              mountPath: /etc/certs
+              readOnly: true
+      volumes:
+        - name: cloud-secret
+          secret:
+            secretName: cloud-secret
+        - name: tls-certs
+          secret:
+            secretName: kubescape-admission-webhook-tls
+        - name: tmp-dir
+          emptyDir: {}
+        - name: ks-cloud-config
+          configMap:
+            name: ks-cloud-config
+            items:
+            - key: "clusterData"
+              path: "clusterData.json"
+        - name: ks-capabilities
+          configMap:
+            name: ks-capabilities
+            items:
+              - key: "capabilities"
+                path: "capabilities.json"
+        - name: config
+          configMap:
+            name: operator
+            items:
+            - key: "config.json"
+              path: "config.json"
+        - name: cs-matching-rules
+          configMap:
+            name: cs-matching-rules
+            items:
+              - key: "matchingRules.json"
+                path: "matchingRules.json"
+      serviceAccountName: operator
+      automountServiceAccountToken: true
+      nodeSelector:
+        kubernetes.io/os: linux
+      affinity:
+      tolerations:
+---
+# Source: kubescape-operator/templates/storage/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storage
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: storage
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubescape-operator
+      app.kubernetes.io/instance: kubescape
+      app.kubernetes.io/component: storage
+  template:
+    metadata:
+      annotations:
+        checksum/storage-config: b40eaa21788a7e4ce23e35e65d8e94622d338e9622109f60edf5c9403ebd95d2
+        checksum/cloud-config: 2ddf2ee6c8a2caf8f640d4b43596f4e846123b1449276ce68213540a85ca0977
+      labels:
+        helm.sh/chart: kubescape-operator-1.40.3
+        app.kubernetes.io/name: kubescape-operator
+        app.kubernetes.io/instance: kubescape
+        app.kubernetes.io/component: storage
+        app.kubernetes.io/version: "1.40.3"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: kubescape
+        app: storage
+        tier: ks-control-plane
+        kubescape.io/ignore: "true"
+        kubescape.io/tier: "core"
+    spec:
+      serviceAccountName: storage
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+        runAsUser: 65532
+        fsGroup: 65532
+      containers:
+      - name: apiserver
+        image: "quay.io/kubescape/storage:v0.0.297"
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+        livenessProbe:
+          httpGet:
+            path: /livez
+            port: 8443
+            scheme: HTTPS
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8443
+            scheme: HTTPS
+        env:
+          - name: GOMEMLIMIT
+            valueFrom:
+              resourceFieldRef:
+                resource: limits.memory
+                divisor: '1'
+          - name: KS_LOGGER_LEVEL
+            value: "info"
+          - name: KS_LOGGER_NAME
+            value: "zap"
+        volumeMounts:
+          - name: "data"
+            mountPath: "/data"
+          - name: ks-cloud-config
+            mountPath: /etc/config/clusterData.json
+            readOnly: true
+            subPath: "clusterData.json"
+          - name: config
+            mountPath: /etc/config/config.json
+            readOnly: true
+            subPath: "config.json"
+          - name: "ca-certificates"
+            mountPath: /etc/storage-ca-certificates
+            readOnly: true
+        resources:
+            limits:
+              cpu: 1500m
+              memory: 1500Mi
+            requests:
+              cpu: 100m
+              memory: 400Mi
+      nodeSelector:
+        kubernetes.io/os: linux
+      affinity:
+      tolerations:
+      
+      volumes:
+        - name: "data"
+          persistentVolumeClaim:
+            claimName: kubescape-storage
+        - name: ks-cloud-config
+          configMap:
+            name: ks-cloud-config
+            items:
+            - key: "clusterData"
+              path: "clusterData.json"
+        - name: config
+          configMap:
+            name: storage
+            items:
+              - key: "config.json"
+                path: "config.json"
+        - name: "ca-certificates"
+          secret:
+            secretName: storage-tls
+---
+# Source: kubescape-operator/templates/kubescape-scheduler/cronjob.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: kubescape-scheduler
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: kubescape-scheduler
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: kubescape-scheduler
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+    armo.tier: "kubescape-scan"
+    kubescape.io/tier: "core"
+spec:
+  schedule: "2 16 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          annotations:
+            
+          labels:
+            helm.sh/chart: kubescape-operator-1.40.3
+            app.kubernetes.io/name: kubescape-operator
+            app.kubernetes.io/instance: kubescape
+            app.kubernetes.io/component: kubescape-scheduler
+            app.kubernetes.io/version: "1.40.3"
+            app.kubernetes.io/managed-by: Helm
+            app.kubernetes.io/part-of: kubescape
+            app: kubescape-scheduler
+            tier: ks-control-plane
+            kubescape.io/ignore: "true"
+            armo.tier: "kubescape-scan"
+            kubescape.io/tier: "core"
+        spec:
+          securityContext:
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+          - name: kubescape-scheduler
+            image: "quay.io/kubescape/http-request:v0.2.20"
+            imagePullPolicy: IfNotPresent
+            resources:
+              limits:
+                cpu: 10m
+                memory: 20Mi
+              requests:
+                cpu: 1m
+                memory: 10Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              runAsNonRoot: true
+              runAsUser: 100
+            args:
+              - -method=post
+              - -scheme=http
+              - -host=operator:4002
+              - -path=v1/triggerAction
+              - -headers=Content-Type:application/json
+              - -path-body=/home/ks/request-body.json
+            volumeMounts:
+              - name: kubescape-scheduler
+                mountPath: /home/ks/request-body.json
+                subPath: request-body.json
+                readOnly: true
+          restartPolicy: Never
+          serviceAccountName: kubescape
+          automountServiceAccountToken: false
+          nodeSelector:
+            kubernetes.io/os: linux
+          affinity:
+          tolerations:
+          
+          volumes:
+          - name: kubescape-scheduler
+            configMap:
+              name: kubescape-scheduler
+---
+# Source: kubescape-operator/templates/kubevuln-scheduler/cronjob.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: kubevuln-scheduler
+  namespace: kubescape
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: kubevuln-scheduler
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: kubevuln-scheduler
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+    armo.tier: "vuln-scan"
+    kubescape.io/tier: "core"
+spec:
+  schedule: "2 16 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          annotations:
+            
+          labels:
+            helm.sh/chart: kubescape-operator-1.40.3
+            app.kubernetes.io/name: kubescape-operator
+            app.kubernetes.io/instance: kubescape
+            app.kubernetes.io/component: kubevuln-scheduler
+            app.kubernetes.io/version: "1.40.3"
+            app.kubernetes.io/managed-by: Helm
+            app.kubernetes.io/part-of: kubescape
+            app: kubevuln-scheduler
+            tier: ks-control-plane
+            kubescape.io/ignore: "true"
+            armo.tier: "vuln-scan"
+            kubescape.io/tier: "core"
+        spec:
+          securityContext:
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+          - name: kubevuln-scheduler
+            image: "quay.io/kubescape/http-request:v0.2.20"
+            imagePullPolicy: IfNotPresent
+            resources:
+              limits:
+                cpu: 10m
+                memory: 20Mi
+              requests:
+                cpu: 1m
+                memory: 10Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              runAsNonRoot: true
+              runAsUser: 100
+            args:
+              - -method=post
+              - -scheme=http
+              - -host=operator:4002
+              - -path=v1/triggerAction
+              - -headers=Content-Type:application/json
+              - -path-body=/home/ks/request-body.json
+            volumeMounts:
+              - name: kubevuln-scheduler
+                mountPath: /home/ks/request-body.json
+                subPath: request-body.json
+                readOnly: true
+          restartPolicy: Never
+          serviceAccountName: kubevuln
+          automountServiceAccountToken: false
+          nodeSelector:
+            kubernetes.io/os: linux
+          affinity:
+          tolerations:
+          
+          volumes:
+          - name: kubevuln-scheduler
+            configMap:
+              name: kubevuln-scheduler
+---
+# Source: kubescape-operator/templates/storage/apiservice.yaml
+apiVersion: apiregistration.k8s.io/v1
+kind: APIService
+metadata:
+  name: v1beta1.spdx.softwarecomposition.kubescape.io
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: storage
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+spec:
+  group: "spdx.softwarecomposition.kubescape.io"
+  groupPriorityMinimum: 1000
+  versionPriority: 15
+  version: "v1beta1"
+  service:
+    name: storage
+    namespace: kubescape
+  caBundle: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURGVENDQWYyZ0F3SUJBZ0lRUDFiYktER09ObTYwek9OcjArRFNYREFOQmdrcWhraUc5dzBCQVFzRkFEQVYKTVJNd0VRWURWUVFERXdwemRHOXlZV2RsTFdOaE1CNFhEVEkyTURnd09ERTRNRGcxT0ZvWERUSTRNRGd3TnpFNApNRGcxT0Zvd0ZURVRNQkVHQTFVRUF4TUtjM1J2Y21GblpTMWpZVENDQVNJd0RRWUpLb1pJaHZjTkFRRUJCUUFECmdnRVBBRENDQVFvQ2dnRUJBS0FLWW1XY1dCRjhNN0VvWGJ6c0JXRFEzM0IvQ3pSSk1ycEViSWdDTDJpenJFM2IKQzd3QnJtZDJXYzNYZkVzQzVYTnRreHBOd0JFOFN6WGYzYzk2ZVFjdUxEMTd6MWpkOTNua0hxUGxLNEZIVU5ZRQpKUGRwL1NSY2ZBODF2Z0FDTDVQajBXVTNtVzdmR3V4aSs5Qk1iczE3a3V5UEF1NFdZN2Fud1NhdTNEK1ZnaVZnCjliZGlScnBaaFpWWjZadnN3bHdxQXN2SVZrY25wbVVCWTBRZ1EweUtCWXQxdVJFVndrT24yZnRZTlloZng4elEKUWQ0eGlabi9Fbm9UUmNNOVIzdTljaDMrOVpsUVFlb2QwS1FzdHV1TFRvZ0xwZndtV2k0dlZ4eEI0bWY4Z3hibgpISVlEbEJSK25HSnI3TGk1cldkNWwxbVJJZEtkamQvRWc1VWptd1VDQXdFQUFhTmhNRjh3RGdZRFZSMFBBUUgvCkJBUURBZ0trTUIwR0ExVWRKUVFXTUJRR0NDc0dBUVVGQndNQkJnZ3JCZ0VGQlFjREFqQVBCZ05WSFJNQkFmOEUKQlRBREFRSC9NQjBHQTFVZERnUVdCQlJadnhrSkZZYy9BQko1UlBTRlFidVB1S2xManpBTkJna3Foa2lHOXcwQgpBUXNGQUFPQ0FRRUFiNHQzRlRHbWdYOE1tVm9xSjR5Z2ExanowY1NUVENvN0ErQXRwRGtaZ1hhckR3Tlo2TnVyClZlQ0ZpaG1sTG5GOHE2WUxZa2dVeHB5M2x3Z3lTbCtaWHc5QUw2MHFnTVU2ODBoWExwS3BkWWJoTmk4Y2VUVU4KSlZMYTlNYVhHYzdIaHhaTjFrUjUrb0lMMjkwK2g2aEVXZllITGc4bmRzT1lMZm1yRGM1VVlzQnBkK2EzdFo5dAo5Mkd4bUUrcWJ6Y1J1dzY0Q055dll3dW5XQld4NWlxSnJ1d0Flbm5BOWNVODl6VHlaWmFhemtvRmRoRWtzWTIvCjNhcXdoejloTTdVdW1EbkFPOHNwSkZDMHh1VTk1Vm1zcTljSGViVi8yclU2UjRaam4zcDl5ZU14cytOcThPWHcKdXpyQ3lUcFFOYmNFbjRyclM4R2hRZXJnRUtUMlFqUGNadz09Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+---
+# Source: kubescape-operator/templates/node-agent/servicemonitor.yaml
+# If prometheus enabled, add prometheus exporter
+---
+# Source: kubescape-operator/templates/operator/admission-webhook/webhook.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: kubescape-admission-webhook
+  annotations:
+    
+  labels:
+    helm.sh/chart: kubescape-operator-1.40.3
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/component: operator
+    app.kubernetes.io/version: "1.40.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubescape
+    app: operator
+    tier: ks-control-plane
+    kubescape.io/ignore: "true"
+webhooks:
+  - name: validation.kubescape.admission
+    clientConfig:
+      service:
+        name: kubescape-admission-webhook
+        namespace: kubescape
+        path: /validate
+        port: 443
+      caBundle: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURJRENDQWdpZ0F3SUJBZ0lSQUtEOXBMeDZaSkpuQldNc1kwQ2lLWGt3RFFZSktvWklodmNOQVFFTEJRQXcKR2pFWU1CWUdBMVVFQXd3UEtpNXJkV0psYzJOaGNHVXVjM1pqTUI0WERUSTJNRGd3T0RFNE1EZzFPRm9YRFRNMgpNRGd3TlRFNE1EZzFPRm93R2pFWU1CWUdBMVVFQXd3UEtpNXJkV0psYzJOaGNHVXVjM1pqTUlJQklqQU5CZ2txCmhraUc5dzBCQVFFRkFBT0NBUThBTUlJQkNnS0NBUUVBdnliNCtJak43dWhlNmxLTEJVdU9NZHFSbmJFejl2emUKeS9MRzJMSHY1ckpaUUt5RFZqdjllOGgxSno4VncrS3pwQVpTVjQrQ0FkbnFwcTJQajdudHF2bDJnSk85UEl0dApVR0pCcVZ6aFQ3eXl1RkU0L1o1YXRTWXpxbjg0NGJyRFgrcVZZYkxVcVdqa2Q1RjcwTGJJVTdOQ0s5NFVzQm94CnNPY3ZCakV2M1I4QkNCelY2YlQydHZDY0pxTXFReXVnMGFTT2J3bmpmS3lHRnprQUc3NHpVSUc2by9JR2JrbHUKMDVkWmdVRTU5NVU4VzBtRGtUbUtZUWtTMEVQMDNEZGRqS1NjSGJYS2R3aVMxSDNacFpIQzZUYWR5R2xyYkdSMApNcXEyMmNLQ0lzU1E5eWdheHZkVUtlRUk5L2ZrZW5pRWJKeE5XNmVCcU56L3RHaDRRYXJ4endJREFRQUJvMkV3Clh6QU9CZ05WSFE4QkFmOEVCQU1DQXFRd0hRWURWUjBsQkJZd0ZBWUlLd1lCQlFVSEF3RUdDQ3NHQVFVRkJ3TUMKTUE4R0ExVWRFd0VCL3dRRk1BTUJBZjh3SFFZRFZSME9CQllFRkU4OGNPTjRXOWNKeGd5a2VveEh5Q3lscTIwcApNQTBHQ1NxR1NJYjNEUUVCQ3dVQUE0SUJBUUF1ZUJBdGtnTCtZeHdkTG03bkNVSDdVRllTb2FGeVdmckpINXZBCktaOWYxeHlLK1F0VmlNV1d6cTM0RUtqV3JPNzBqTHVSQXFQb1FSY1RJU3d4aU1BdEpuWEVOWFE2dFZPSTAvdksKWWFhaHFQLzh4MkttbVRyNlZOZ1U4eEsvQ2dFeUxHQUcvS1ZPRlJlcFJ0RnVjVVVkOVJRYmh1T3Z1TWMwVkw2Vgp5MWdBOE5NT0JiWmhpaFkwWHJDcUxTOENNTFc1c0hkaFJUbXlSVUhqV01pMThKQXpNQUxjN3RPZWMvTFBibDVJCjVGZmU5aUhlK2VmcnYyVFdkdnBjbS9xbDNJTmlnQnF6QndMK1kyaGN0RG1pWW1SbFlPTjBvMTd6S2NQZDh6eUgKRm96YlhUMmNzdkw4a1JMR1BYdmtQSEpnU2V2cDByNWMxNFZZTXJRYW90VWJteXpyCi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    rules:
+      - operations: ["CREATE", "UPDATE", "DELETE", "CONNECT"]
+        apiGroups: ["*"]
+        apiVersions: ["v1"]
+        resources: ["pods", "pods/exec", "pods/portforward", "pods/attach", "clusterrolebindings", "rolebindings"]
+        scope: "*"
+      - operations: ["CREATE"]
+        apiGroups: ["networking.k8s.io"]
+        apiVersions: ["v1"]
+        resources: ["networkpolicies"]
+        scope: "*"
+    failurePolicy: Ignore
