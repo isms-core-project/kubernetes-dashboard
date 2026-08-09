@@ -210,21 +210,27 @@ cluster — no configuration required:
 | Kubescape | `spdx.softwarecomposition.kubescape.io` | Kubescape (compliance scores, CVE findings) |
 | Gateway API | `gateway.networking.k8s.io` | Gateway API (GatewayClasses, Gateways, HTTPRoutes) |
 
-### Installing Kubescape correctly
+### Installing Kubescape — known issue with v4.0.11
 
-The upstream `kubescape-operator` Helm chart has a real bug: its `kubescape` container
-hardcodes `readOnlyRootFilesystem: true` with **no values.yaml override**. This makes the
-scan engine's own internal "generate account ID" step fail with `chmod: operation not
-permitted` on every scan, and every workload shows `Passed: 0 / Failed: 0 / Score: 0` on
-the dashboard's Security page as a result.
+The dashboard's Security page reads real data from Kubescape once it's installed, but as
+of `v4.0.11` (the current upstream release) every workload shows `Passed: 0 / Failed: 0 /
+Score: 0`. This is a genuine upstream bug, not a dashboard bug or a misconfiguration —
+root-caused directly in Kubescape's own source:
 
-Setting `readOnlyRootFilesystem: false` on that one container (patch below) has resolved
-this in testing, but **the fix is not yet fully confirmed** — it worked once against an
-already-running deployment, then the identical symptom reappeared on a from-scratch
-reinstall even with the same patch applied, so there may be more to this than a single
-`securityContext` field. Treat the patch as the best known mitigation, not a guaranteed
-fix, until this is verified more thoroughly. The chart has no values.yaml key to make it
-permanent even once it is confirmed, so it must be re-applied after every `helm upgrade`:
+`core/cautils/customerloader.go`'s `updateConfigFile()` calls `os.Chmod` on its local
+config directory as part of persisting an internal account-ID cache. In `v4.0.11` that
+chmod is **fatal** — a failure aborts the whole write, silently discarding an otherwise
+complete, correct scan report before it ever reaches the CRDs this dashboard reads.
+Kubescape's own maintainers already fixed this
+([commit `16cc4e21`](https://github.com/kubescape/kubescape/commit/16cc4e21)) — chmod
+failure is now a logged warning, not fatal — but that fix merged **six days after**
+`v4.0.11` shipped, and no release since has picked it up.
+
+**There is no manifest-side workaround.** We tried two (`readOnlyRootFilesystem: false`;
+redirecting Kubescape's cache directory via `KS_CACHE_DIR`) — neither has any effect,
+since the failure is compiled into the binary itself, not driven by anything in the pod
+spec. Until a release ships with the fix, install normally and expect the Security page
+to stay empty:
 
 ```bash
 helm repo add kubescape https://kubescape.github.io/helm-charts/ && \
@@ -234,10 +240,6 @@ helm upgrade --install kubescape kubescape/kubescape-operator \
   --set clusterName=$(kubectl config current-context) \
   --set capabilities.relevancy=enable \
   --set capabilities.networkPolicyService=enable
-
-# Required after every install/upgrade above — do not skip:
-kubectl patch deployment kubescape -n kubescape --type='json' \
-  -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/securityContext/readOnlyRootFilesystem", "value": false}]'
 ```
 
 Kubescape's scan data lives on a real PersistentVolumeClaim (Longhorn or similar), not just
