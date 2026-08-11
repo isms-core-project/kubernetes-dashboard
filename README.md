@@ -87,6 +87,11 @@ Goldilocks-style CPU/memory comparison with trend arrows.
 
 ![Resource efficiency](screenshots/k8s_dashboard_resource_efficiency.png)
 
+### Registry Manager
+Docker pull secrets cross-referenced with pod `imagePullSecrets`.
+
+![Registry Manager](screenshots/k8s_dashboard_registry_manager.png)
+
 ### Certificate Manager
 cert-manager Certificates, Issuers, and ClusterIssuers — auto-detected.
 
@@ -120,7 +125,8 @@ Per-namespace project cards.
 ### Kubescape Security
 Compliance scores and CVE findings — auto-detected.
 
-![Kubescape](screenshots/k8s_dashboard_kubescape.png)
+![Kubescape Config Scan](screenshots/k8s_dashboard_kubescape_config_scan.png)
+![Kubescape Vulnerabilities](screenshots/k8s_dashboard_kubescape_config_vulnerabilities.png)
 
 ### VictoriaMetrics Sparklines
 Pod CPU/memory sparklines with 1h/6h/24h/7d selector.
