@@ -195,6 +195,13 @@ The Angular flavor also has features of its own:
 
 ## Version
 
-Angular 21 is the current Active LTS release (supported to 2027). The next upgrade cycle
-(to v22 or v23) should be considerably simpler — the breaking MDC migration and builder change
-are both behind us, and the incremental steps will be smaller.
+The dashboard has since gone one step further: Angular 21 → 22, once an upstream Angular CLI
+build-pipeline deadlock affecting stylesheet bundling was fixed upstream. That step also required
+migrating ESLint from its legacy `.eslintrc.*` format to flat config (`eslint.config.js`) —
+ESLint 9 dropped support for the old format outright — and swapping the `eslint-plugin-rxjs`
+lint rules for the actively maintained `eslint-plugin-rxjs-x` fork, since the original package
+never published an ESLint 9/10-compatible release. Angular 22 is the current Active LTS release.
+As predicted here, this cycle was considerably simpler than 16→21 — the breaking MDC migration
+and builder change were both already behind us — though TypeScript 6 (bundled with Angular 22)
+turned out to flip `strict` mode on by default, which needed pinning back off to match this
+project's own separately-scoped strict-mode rollout plan.

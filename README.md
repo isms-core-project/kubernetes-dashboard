@@ -6,11 +6,11 @@ The original [kubernetes/dashboard](https://github.com/kubernetes-retired/dashbo
 
 We took up the challenge.
 
-The Go API backend was solid and worth keeping. The Angular WebUI was Angular 16 — already one major version behind at archive time, and drifting further every month. Rather than let it rot, we forked it and upgraded it the right way: stepping through every Angular major version one at a time — 16 → 17 → 18 → 19 → 20 → 21 — fixing all 44 catalogued breaking changes along the way. See [ANGULAR-UPGRADE.md](ANGULAR-UPGRADE.md) for the full story.
+The Go API backend was solid and worth keeping. The Angular WebUI was Angular 16 — already one major version behind at archive time, and drifting further every month. Rather than let it rot, we forked it and upgraded it the right way: stepping through every Angular major version one at a time — 16 → 17 → 18 → 19 → 20 → 21 — fixing all 44 catalogued breaking changes along the way. See [ANGULAR-UPGRADE.md](ANGULAR-UPGRADE.md) for the full story. It's since gone one step further, to Angular 22.
 
 | | Angular + Angular Material |
 |---|---|
-| **Framework** | Angular 21, Angular Material 21 (M3) |
+| **Framework** | Angular 22, Angular Material 22 (M3) |
 | **Namespace** | `kubernetes-dashboard` |
 | **Web image** | `dashboard-web-angular-latest` |
 | **Manifests** | `manifests/` |
