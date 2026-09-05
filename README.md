@@ -16,7 +16,7 @@ The Go API backend was solid and worth keeping. The Angular WebUI was Angular 16
 | **Manifests** | `manifests/` |
 | **Deploy guide** | [DEPLOYMENT.md](DEPLOYMENT.md) |
 
-Uses the shared Go images: `dashboard-api`, `dashboard-auth`, `dashboard-metrics-scraper`, and Kong 3.9.1. All images pull from `ghcr.io/isms-core-project/kubernetes-dashboard`.
+Uses the shared Go images: `dashboard-api`, `dashboard-auth`, `dashboard-metrics-scraper`, and Kong 3.9.3. All images pull from `ghcr.io/isms-core-project/kubernetes-dashboard`.
 
 ---
 
@@ -156,7 +156,7 @@ Five pods in the dashboard namespace, fronted by a Kong API gateway:
 
 ```
 Browser
-  └── Kong 3.9.1 (DBless, NodePort :30080)
+  └── Kong 3.9.3 (DBless, NodePort :30080)
         ├── /api/v1/login, /csrftoken, /me   → dashboard-auth
         ├── /api/*                            → dashboard-api
         │     └── sidecar: dashboard-metrics-scraper
