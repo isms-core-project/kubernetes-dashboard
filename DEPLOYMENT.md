@@ -210,27 +210,30 @@ cluster — no configuration required:
 | Kubescape | `spdx.softwarecomposition.kubescape.io` | Kubescape (compliance scores, CVE findings) |
 | Gateway API | `gateway.networking.k8s.io` | Gateway API (GatewayClasses, Gateways, HTTPRoutes) |
 
-### Installing Kubescape — known issue with v4.0.11
+### Installing Kubescape
 
-The dashboard's Security page reads real data from Kubescape once it's installed, but as
-of `v4.0.11` (the current upstream release) every workload shows `Passed: 0 / Failed: 0 /
-Score: 0`. This is a genuine upstream bug, not a dashboard bug or a misconfiguration —
-root-caused directly in Kubescape's own source:
+The dashboard's Security page reads real data from Kubescape once it's installed. An
+earlier upstream release, `v4.0.11`, shipped with a fatal `chmod` bug in
+`core/cautils/customerloader.go` that silently discarded every scan before it reached the
+CRDs this dashboard reads (every workload showed `Passed: 0 / Failed: 0 / Score: 0`) — that
+was a genuine upstream bug, not a dashboard bug, and there was no manifest-side workaround
+for it. Kubescape's maintainers fixed it in
+[commit `16cc4e21`](https://github.com/kubescape/kubescape/commit/16cc4e21), and the fix is
+in the official release: **install `v4.0.13` or later** and this doesn't apply.
 
-`core/cautils/customerloader.go`'s `updateConfigFile()` calls `os.Chmod` on its local
-config directory as part of persisting an internal account-ID cache. In `v4.0.11` that
-chmod is **fatal** — a failure aborts the whole write, silently discarding an otherwise
-complete, correct scan report before it ever reaches the CRDs this dashboard reads.
-Kubescape's own maintainers already fixed this
-([commit `16cc4e21`](https://github.com/kubescape/kubescape/commit/16cc4e21)) — chmod
-failure is now a logged warning, not fatal — but that fix merged **six days after**
-`v4.0.11` shipped, and no release since has picked it up.
+**Recommended: the static manifest.** `manifests/30-kubescape.yaml` is the exact
+configuration we run and validate against our own cluster's Security page (both Config
+Scan and Vulnerabilities populated with real data):
 
-**There is no manifest-side workaround.** We tried two (`readOnlyRootFilesystem: false`;
-redirecting Kubescape's cache directory via `KS_CACHE_DIR`) — neither has any effect,
-since the failure is compiled into the binary itself, not driven by anything in the pod
-spec. Until a release ships with the fix, install normally and expect the Security page
-to stay empty:
+```bash
+kubectl apply -f manifests/30-kubescape.yaml
+```
+
+**Alternative: the upstream Helm chart.** This is what the manifest above is generated
+from, and gives you more direct control over version/values, but we've seen the
+Vulnerabilities panel stay empty with just the default flags below — you may need to dig
+into the chart's `values.yaml` for the equivalent of what `30-kubescape.yaml` already
+enables (`kubevuln` + `kubevulnScheduler` are the ones that matter for CVE data):
 
 ```bash
 helm repo add kubescape https://kubescape.github.io/helm-charts/ && \
