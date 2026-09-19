@@ -3363,7 +3363,7 @@ spec:
         fsGroup: 65532
       containers:
       - name: kubescape
-        image: "quay.io/kubescape/kubescape:v4.0.13"
+        image: "quay.io/kubescape/kubescape:v4.0.14"
         imagePullPolicy: IfNotPresent
         securityContext:
           allowPrivilegeEscalation: false

@@ -243,16 +243,14 @@ spec:
                   resource: limits.memory
                   divisor: "1"
           livenessProbe:
-            httpGet:
-              path: /metrics
+            tcpSocket:
               port: 8000
             initialDelaySeconds: 15
             periodSeconds: 15
             failureThreshold: 3
             timeoutSeconds: 5
           readinessProbe:
-            httpGet:
-              path: /metrics
+            tcpSocket:
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 10
