@@ -8,7 +8,7 @@
 # and now shipped in the official v4.0.12 release (published 2026-08-12) —
 # confirmed via GitHub's compare API that v4.0.12 contains 16cc4e21 (ahead_by
 # 265, behind_by 0), and via quay.io that the v4.0.12 image is actually
-# published. This file is bumped to `quay.io/kubescape/kubescape:v4.0.13`
+# published. This file is bumped to `quay.io/kubescape/kubescape:v4.0.14`
 # accordingly (routine patch release — still contains the chmod fix). The
 # sibling file `30-kubescape-test.yaml` still points at the
 # temporary custom-built image (see k8s_dash_kubescape/README.md) — once this
@@ -62,7 +62,7 @@
 # call doesn't consult that variable at all — it's hardcoded to
 # ConfigFileFullPath()'s directory.
 #
-# Resolved: this file now runs quay.io/kubescape/kubescape:v4.0.13, which
+# Resolved: this file now runs quay.io/kubescape/kubescape:v4.0.14, which
 # contains the fix — no manifest-side workaround needed, as always expected.
 # =============================================================================
 

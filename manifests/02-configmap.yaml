@@ -56,10 +56,6 @@ data:
             paths:
               - /api
             strip_path: false
-          - name: metrics
-            paths:
-              - /metrics
-            strip_path: false
       - name: web
         host: kubernetes-dashboard-web
         port: 8000
