@@ -55,6 +55,46 @@ subjects:
     name: kubernetes-dashboard-api
     namespace: kubernetes-dashboard
 
+---
+# Cluster Shell: each cluster-shell session gets its own throwaway pod +
+# kubeconfig secret in this namespace, rather than every session running in
+# the shared api container as the same OS user. A separate Role from the api
+# Role above (rather than widening it) so this create/delete power stays
+# visibly scoped to just this one feature. The caller's own RBAC — not this
+# SA — still governs the pods/exec call into the resulting pod and
+# everything the in-shell kubectl can do; this Role only covers pod/secret
+# lifecycle.
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: kubernetes-dashboard-api-clustershell
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/component: api
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "secrets"]
+    verbs: ["create", "get", "list", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kubernetes-dashboard-api-clustershell
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/component: api
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kubernetes-dashboard-api-clustershell
+subjects:
+  - kind: ServiceAccount
+    name: kubernetes-dashboard-api
+    namespace: kubernetes-dashboard
+
 # ── WEB ──────────────────────────────────────────────────────────────────────
 
 ---

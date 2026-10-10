@@ -38,6 +38,8 @@ spec:
         - name: kubernetes-dashboard-auth
           image: ghcr.io/isms-core-project/kubernetes-dashboard:dashboard-auth-latest
           imagePullPolicy: Always
+          args:
+            - --auto-generate-certificates=true
           ports:
             - name: auth
               containerPort: 8000
@@ -118,7 +120,7 @@ spec:
           args:
             - --namespace=kubernetes-dashboard
             - --metrics-scraper-service-name=kubernetes-dashboard-metrics-scraper
-            - --sidecar-host=http://kubernetes-dashboard-metrics-scraper:8000
+            - --sidecar-host=https://kubernetes-dashboard-metrics-scraper:8000
           ports:
             - name: api
               containerPort: 8000
@@ -129,6 +131,13 @@ spec:
                 secretKeyRef:
                   name: kubernetes-dashboard-csrf
                   key: private.key
+            # Shared secret for api <-> metrics-scraper (self-signed TLS + bearer
+            # token, not mTLS — see 01-secrets.yaml for how to create this Secret).
+            - name: METRICS_SCRAPER_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: kubernetes-dashboard-metrics-scraper-auth
+                  key: token
             - name: ANTHROPIC_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -343,10 +352,19 @@ spec:
         - name: kubernetes-dashboard-metrics-scraper
           image: ghcr.io/isms-core-project/kubernetes-dashboard:dashboard-metrics-scraper-latest
           imagePullPolicy: Always
+          args:
+            - --auto-generate-certificates=true
           ports:
             - containerPort: 8000
               protocol: TCP
           env:
+            # Shared secret for api <-> metrics-scraper (self-signed TLS + bearer
+            # token, not mTLS — see 01-secrets.yaml for how to create this Secret).
+            - name: METRICS_SCRAPER_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: kubernetes-dashboard-metrics-scraper-auth
+                  key: token
             # ── VictoriaMetrics (optional) ────────────────────────────────────────────
             # Must match the value set on the api container above. PROMETHEUS_ENDPOINT
             # is not read here — metrics-scraper pushes custom metrics via VM's
@@ -382,8 +400,8 @@ spec:
               memory: 400Mi
           livenessProbe:
             httpGet:
-              scheme: HTTP
-              path: /
+              scheme: HTTPS
+              path: /healthz
               port: 8000
             initialDelaySeconds: 30
             timeoutSeconds: 30

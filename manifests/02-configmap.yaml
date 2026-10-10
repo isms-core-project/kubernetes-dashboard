@@ -30,7 +30,10 @@ data:
       - name: auth
         host: kubernetes-dashboard-auth
         port: 8000
-        protocol: http
+        protocol: https
+        # Self-signed cert (auth --auto-generate-certificates), no shared CA —
+        # tls_verify off since there's no certificate to validate against.
+        tls_verify: false
         routes:
           - name: authLogin
             paths:
