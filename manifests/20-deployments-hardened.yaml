@@ -547,7 +547,7 @@ spec:
               app.kubernetes.io/name: kubernetes-dashboard-kong
       containers:
         - name: kong
-          image: kong:3.9.3
+          image: kong:3.9.4
           imagePullPolicy: IfNotPresent
           env:
             - name: KONG_PREFIX
