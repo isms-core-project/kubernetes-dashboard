@@ -47,6 +47,10 @@ data:
             paths:
               - ~/api/v1/me$
             strip_path: false
+          - name: authLogout
+            paths:
+              - ~/api/v1/logout$
+            strip_path: false
       - name: api
         host: kubernetes-dashboard-api
         port: 8000
